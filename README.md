@@ -70,6 +70,86 @@ TypeScript runs in-place via **tsx**:
 - `tsx` is a **runtime** dependency so cold `npx`/global installs work
 - `pnpm typecheck` (`tsc --noEmit`) is optional and not required to run
 
+## Usage
+
+`oz-acp` is an **ACP agent server**. An ACP host (editor/UI) starts it as a subprocess and speaks [JSON-RPC over stdio](https://agentclientprotocol.com) (newline-delimited JSON). You normally do **not** run it interactively yourself—the host owns the transport.
+
+### What you can do with it
+
+| Goal | How |
+|---|---|
+| Use Oz from Zed’s Agent Panel | Register `oz-acp` as a custom agent server (below) |
+| Resume a prior chat | Host calls `session/load` / `session/resume` with the saved `sessionId` |
+| Pick an Oz model | Host model/config UI (`configId: "model"`) or `session/set_config_option` |
+| Cancel an in-flight turn | Host sends `session/cancel` |
+| Point Oz at a project directory | Host passes `cwd` on `session/new` (mapped to `oz agent run --cwd`) |
+
+### Typical ACP session flow
+
+1. Host starts `oz-acp` and calls **`initialize`** (ACP protocol version `1`).
+2. Host calls **`session/new`** with an absolute `cwd` (your project root).
+3. Host sends **`session/prompt`** with text content blocks.
+4. Adapter starts `oz agent run`, polls the run/conversation, and streams **`session/update`** notifications (`agent_message_chunk`, `tool_call`, `tool_call_update`, …).
+5. When the Oz run finishes, **`session/prompt`** returns `{ "stopReason": "end_turn" }` (or `"cancelled"`).
+6. Later turns reuse the same ACP `sessionId`; the adapter continues the bound Oz `conversationId`.
+
+Supported agent methods include: `initialize`, `session/new`, `session/load`, `session/resume`, `session/list`, `session/delete`, `session/prompt`, `session/cancel`, `session/set_config_option` (plus `session/set_model` aliases).
+
+### Run the adapter manually (debug only)
+
+```bash
+# stdio server — host would attach here
+node bin/oz-acp.mjs
+# or
+pnpm exec oz-acp
+```
+
+Smoke without a full host:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"'"$(pwd)"'","mcpServers":[]}}' \
+  | node bin/oz-acp.mjs
+```
+
+Expect JSON-RPC responses for `initialize` and `session/new` on stdout. Keep logs on stderr only—stdout is the ACP transport.
+
+### Prompt example (conceptual)
+
+Hosts send prompts like:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session/prompt",
+  "params": {
+    "sessionId": "<id from session/new>",
+    "prompt": [
+      { "type": "text", "text": "Summarize the README in this repo." }
+    ]
+  }
+}
+```
+
+While the turn runs, the adapter emits `session/update` notifications, then answers the original request with a `stopReason`.
+
+### Model selection
+
+On `initialize` / session setup, `oz-acp` runs `oz model list` and exposes models as ACP config options (`id: "model"`). Switch models from the host UI when supported, or via:
+
+- `session/set_config_option` with `configId: "model"`
+- `session/set_model` / `session/setModel` aliases
+
+### Extra Oz args
+
+Pass extra CLI flags to every `oz` invocation with `OZ_EXTRA_ARGS`:
+
+```bash
+OZ_EXTRA_ARGS='--debug' node bin/oz-acp.mjs
+```
+
 ## Use with Zed
 
 Edit `~/.config/zed/settings.json`.
@@ -104,17 +184,7 @@ Edit `~/.config/zed/settings.json`.
 }
 ```
 
-Then:
-
-1. Open the Agent Panel (`Cmd-?` on macOS)
-2. Select **oz** from the agent dropdown
-3. Start chatting
-
-### Model selection
-
-On `initialize`, `oz-acp` runs `oz model list` and exposes models as ACP config options (`id: "model"`). Switch models from the host UI when supported.
-
-### Extra Oz args
+**With extra Oz args / API key:**
 
 ```json
 {
@@ -124,12 +194,21 @@ On `initialize`, `oz-acp` runs `oz model list` and exposes models as ACP config 
       "command": "oz-acp",
       "args": [],
       "env": {
-        "OZ_EXTRA_ARGS": "--debug"
+        "OZ_EXTRA_ARGS": "--debug",
+        "WARP_API_KEY": "your-key-if-needed"
       }
     }
   }
 }
 ```
+
+Then:
+
+1. Open the Agent Panel (`Cmd-?` on macOS)
+2. Select **oz** from the agent dropdown
+3. Start chatting in a project workspace (that directory becomes the session `cwd`)
+
+To inspect JSON-RPC traffic in Zed, use **dev: open acp logs** from the command palette.
 
 ## Environment variables
 
@@ -186,6 +265,7 @@ Project layout:
 | Empty model list | Network/auth; cache falls back to `auto` |
 | Host shows no agent output | Ensure stdout is reserved for JSON-RPC (logs are on stderr) |
 | Zed cannot start agent | Use absolute path to `bin/oz-acp.mjs`; Node 20+ |
+| Prompt hangs / no updates | Confirm `oz whoami` works and the account has credits |
 
 ## License
 
