@@ -1,0 +1,13 @@
+**/*.test.ts
+**/tsconfig.json
+scripts/
+.agents/
+.gitignore
+.npmrc
+pnpm-lock.yaml
+pnpm-workspace.yaml
+coverage/
+dist/
+*.log
+.env
+.env.*
