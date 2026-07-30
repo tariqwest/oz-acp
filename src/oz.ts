@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { split as splitShellWords } from "./shell-words.ts";
 import {
   ConversationResponseSchema,
@@ -11,6 +14,7 @@ import {
   type RunAgentResponse,
   type RunItem,
 } from "./types.ts";
+import { z } from "zod";
 
 export class OzCliError extends Error {
   readonly exitCode: number | null;
@@ -189,11 +193,47 @@ export async function ozModelList(signal?: AbortSignal): Promise<ModelList> {
   });
 }
 
+const AgentProfileListSchema = z.array(
+  z
+    .object({
+      id: z.string(),
+      name: z.string().optional(),
+    })
+    .passthrough(),
+);
+
+export type AgentProfileInfo = {
+  id: string;
+  name: string;
+};
+
+export async function ozAgentProfileList(
+  signal?: AbortSignal,
+): Promise<AgentProfileInfo[]> {
+  const list = await runOzJson(
+    ["agent", "profile", "list"],
+    (v) => AgentProfileListSchema.parse(v),
+    {
+      signal,
+      timeoutMs: 15_000,
+    },
+  );
+  return list
+    .filter((p) => p.id)
+    .map((p) => ({
+      id: p.id,
+      name: (p.name && String(p.name).trim()) || p.id,
+    }));
+}
+
 export type AgentRunInput = {
   prompt: string;
   cwd: string;
   modelId?: string | null;
   conversationId?: string | null;
+  profileId?: string | null;
+  /** When non-null, written into a temp agent config file as computer_use_enabled. */
+  computerUse?: boolean | null;
   signal?: AbortSignal;
 };
 
@@ -205,12 +245,36 @@ export async function ozAgentRun(input: AgentRunInput): Promise<RunAgentResponse
   if (input.conversationId) {
     args.push("--conversation", input.conversationId);
   }
-  return runOzJson(args, (v) => RunAgentResponseSchema.parse(v), {
-    cwd: input.cwd,
-    signal: input.signal,
-    // Starting a run can take a bit while snapshotting; keep generous.
-    timeoutMs: 120_000,
-  });
+  if (input.profileId) {
+    args.push("--profile", input.profileId);
+  }
+
+  let tempConfigPath: string | null = null;
+  if (typeof input.computerUse === "boolean") {
+    tempConfigPath = path.join(
+      os.tmpdir(),
+      `oz-acp-run-${process.pid}-${Date.now()}.json`,
+    );
+    const config: Record<string, unknown> = {
+      computer_use_enabled: input.computerUse,
+    };
+    if (input.modelId) config.model_id = input.modelId;
+    await fsp.writeFile(tempConfigPath, JSON.stringify(config), "utf8");
+    args.push("--file", tempConfigPath);
+  }
+
+  try {
+    return await runOzJson(args, (v) => RunAgentResponseSchema.parse(v), {
+      cwd: input.cwd,
+      signal: input.signal,
+      // Starting a run can take a bit while snapshotting; keep generous.
+      timeoutMs: 120_000,
+    });
+  } finally {
+    if (tempConfigPath) {
+      await fsp.unlink(tempConfigPath).catch(() => undefined);
+    }
+  }
 }
 
 export async function ozRunGet(

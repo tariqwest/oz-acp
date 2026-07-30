@@ -1,11 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+  applyConfigOptionValue,
+  buildSessionConfigOptions,
+  MODEL_CONFIG_ID,
+  resolveModelWithEffort,
+  type AgentProfile,
+  type EffortLevel,
+} from "./config-options.ts";
+import {
   decideStopReason,
   flattenPromptText,
   mapConversationDelta,
 } from "./map.ts";
 import {
+  ozAgentProfileList,
   ozAgentRun,
   ozConversationGet,
   ozModelList,
@@ -17,7 +26,6 @@ import { pollRunTurn } from "./stream.ts";
 import type { Session } from "./types.ts";
 
 const PACKAGE_VERSION = "0.1.0";
-const MODEL_CONFIG_ID = "model";
 const MAX_SESSIONS = 64;
 
 type AgentContext = {
@@ -36,6 +44,8 @@ export class OzAcpAgent {
   private readonly defaultCwd: string;
   private availableModels: string[] = [];
   private modelsLoaded = false;
+  private availableProfiles: AgentProfile[] = [];
+  private profilesLoaded = false;
 
   constructor(opts: { store?: SessionStore; defaultCwd?: string } = {}) {
     this.store = opts.store ?? new SessionStore();
@@ -71,40 +81,91 @@ export class OzAcpAgent {
     console.error("[oz-acp] no models available; falling back to auto");
   }
 
+  async initProfiles(): Promise<void> {
+    try {
+      this.availableProfiles = await ozAgentProfileList();
+      this.profilesLoaded = true;
+      if (this.availableProfiles.length) {
+        console.error(
+          `[oz-acp] fetched ${this.availableProfiles.length} agent profiles`,
+        );
+      }
+    } catch (err) {
+      this.availableProfiles = [];
+      this.profilesLoaded = true;
+      console.error(
+        "[oz-acp] oz agent profile list failed:",
+        (err as Error).message,
+      );
+    }
+  }
+
   private async ensureModels(): Promise<string[]> {
     if (!this.modelsLoaded) await this.initModels();
     return this.availableModels;
   }
 
-  private sessionModelsJson(modelId: string | null | undefined) {
+  private async ensureProfiles(): Promise<AgentProfile[]> {
+    if (!this.profilesLoaded) await this.initProfiles();
+    return this.availableProfiles;
+  }
+
+  private async ensureSessionMeta(): Promise<void> {
+    await Promise.all([this.ensureModels(), this.ensureProfiles()]);
+  }
+
+  private resolvedModelId(session: Session): string | null {
+    if (!session.modelId) return null;
+    if (!session.effort) return session.modelId;
+    return resolveModelWithEffort(
+      session.modelId,
+      session.effort,
+      this.availableModels,
+    );
+  }
+
+  private sessionModelsJson(session: Session) {
     const models = this.availableModels.length ? this.availableModels : ["auto"];
-    const current = modelId || models[0] || "auto";
+    const current = this.resolvedModelId(session) || models[0] || "auto";
     return {
       currentModelId: current,
       availableModels: models.map((id) => ({ modelId: id, name: id })),
     };
   }
 
-  private sessionConfigOptionsJson(modelId: string | null | undefined) {
-    const models = this.availableModels.length ? this.availableModels : ["auto"];
-    const current = modelId || models[0] || "auto";
-    return [
-      {
-        id: MODEL_CONFIG_ID,
-        name: "Model",
-        category: "model",
-        type: "select",
-        currentValue: current,
-        options: models.map((id) => ({ value: id, name: id })),
+  private sessionConfigOptionsJson(session: Session) {
+    return buildSessionConfigOptions({
+      availableModels: this.availableModels,
+      profiles: this.availableProfiles,
+      state: {
+        modelId: this.resolvedModelId(session) ?? session.modelId,
+        effort: session.effort,
+        profileId: session.profileId,
+        computerUse: session.computerUse,
       },
-    ];
+    });
   }
 
   private sessionConfigResult(sessionId: string, session: Session) {
     return {
       sessionId,
-      models: this.sessionModelsJson(session.modelId),
-      configOptions: this.sessionConfigOptionsJson(session.modelId),
+      models: this.sessionModelsJson(session),
+      configOptions: this.sessionConfigOptionsJson(session),
+    };
+  }
+
+  private emptySession(cwd: string): Session {
+    return {
+      conversationId: null,
+      lastRunId: null,
+      modelId: null,
+      effort: null,
+      profileId: null,
+      computerUse: null,
+      cwd,
+      seenKeys: new Set(),
+      title: null,
+      activeAbort: null,
     };
   }
 
@@ -132,7 +193,7 @@ export class OzAcpAgent {
   }
 
   async initialize(_params: acp.InitializeRequest): Promise<acp.InitializeResponse> {
-    await this.ensureModels();
+    await this.ensureSessionMeta();
     try {
       const who = await ozWhoami();
       if (who.email || who.display_name || who.uid) {
@@ -176,17 +237,9 @@ export class OzAcpAgent {
   }
 
   async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
-    await this.ensureModels();
+    await this.ensureSessionMeta();
     const sessionId = randomUUID();
-    const session: Session = {
-      conversationId: null,
-      lastRunId: null,
-      modelId: null,
-      cwd: cwdFromParams(params, this.defaultCwd),
-      seenKeys: new Set(),
-      title: null,
-      activeAbort: null,
-    };
+    const session = this.emptySession(cwdFromParams(params, this.defaultCwd));
     this.evictIfNeeded();
     this.sessions.set(sessionId, session);
     await this.persist(sessionId, session);
@@ -197,7 +250,7 @@ export class OzAcpAgent {
     params: acp.LoadSessionRequest,
     cx?: AgentContext,
   ): Promise<acp.LoadSessionResponse> {
-    await this.ensureModels();
+    await this.ensureSessionMeta();
     const sessionId = params.sessionId;
     if (!sessionId) {
       throw Object.assign(new Error("missing sessionId"), { code: -32602 });
@@ -238,7 +291,7 @@ export class OzAcpAgent {
   }
 
   async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
-    await this.ensureModels();
+    await this.ensureSessionMeta();
     const sessionId = params.sessionId;
     if (!sessionId) {
       throw Object.assign(new Error("missing sessionId"), { code: -32602 });
@@ -267,6 +320,9 @@ export class OzAcpAgent {
           conversationId: s.conversationId,
           lastRunId: s.lastRunId,
           modelId: s.modelId,
+          effort: s.effort,
+          profileId: s.profileId,
+          computerUse: s.computerUse,
         },
       })),
     } as acp.ListSessionsResponse;
@@ -294,13 +350,27 @@ export class OzAcpAgent {
         code: -32602,
       });
     }
+    await this.ensureSessionMeta();
     const session = await this.restoreSession(sessionId);
     if (!session) {
       throw Object.assign(new Error(`unknown sessionId: ${sessionId}`), {
         code: -32000,
       });
     }
-    session.modelId = modelId;
+    const next = applyConfigOptionValue({
+      configId: MODEL_CONFIG_ID,
+      value: modelId,
+      state: {
+        modelId: session.modelId,
+        effort: session.effort,
+        profileId: session.profileId,
+        computerUse: session.computerUse,
+      },
+      availableModels: this.availableModels,
+      profiles: this.availableProfiles,
+    });
+    session.modelId = next.modelId;
+    session.effort = next.effort as EffortLevel | null;
     await this.persist(sessionId, session);
     return {};
   }
@@ -310,27 +380,48 @@ export class OzAcpAgent {
   ): Promise<acp.SetSessionConfigOptionResponse> {
     const sessionId = params.sessionId;
     const configId = params.configId;
-    const value = params.value;
-    if (!sessionId || !configId || value == null || value === "") {
+    const value = params.value as unknown;
+    if (!sessionId || !configId || value === undefined || value === null || value === "") {
       throw Object.assign(new Error("missing sessionId, configId, or value"), {
         code: -32602,
       });
     }
-    if (configId !== MODEL_CONFIG_ID) {
-      throw Object.assign(new Error(`unknown configId: ${configId}`), {
-        code: -32602,
-      });
-    }
+    await this.ensureSessionMeta();
     const session = await this.restoreSession(sessionId);
     if (!session) {
       throw Object.assign(new Error(`unknown sessionId: ${sessionId}`), {
         code: -32000,
       });
     }
-    session.modelId = String(value);
+
+    let next;
+    try {
+      next = applyConfigOptionValue({
+        configId,
+        value,
+        state: {
+          modelId: session.modelId,
+          effort: session.effort,
+          profileId: session.profileId,
+          computerUse: session.computerUse,
+        },
+        availableModels: this.availableModels,
+        profiles: this.availableProfiles,
+      });
+    } catch (err) {
+      const message = (err as Error).message || "invalid config option";
+      throw Object.assign(new Error(message), {
+        code: (err as { code?: number }).code ?? -32602,
+      });
+    }
+
+    session.modelId = next.modelId;
+    session.effort = next.effort as EffortLevel | null;
+    session.profileId = next.profileId;
+    session.computerUse = next.computerUse;
     await this.persist(sessionId, session);
     return {
-      configOptions: this.sessionConfigOptionsJson(session.modelId),
+      configOptions: this.sessionConfigOptionsJson(session),
     } as acp.SetSessionConfigOptionResponse;
   }
 
@@ -343,7 +434,7 @@ export class OzAcpAgent {
     params: acp.PromptRequest,
     cx: AgentContext,
   ): Promise<acp.PromptResponse> {
-    await this.ensureModels();
+    await this.ensureSessionMeta();
     const sessionId = params.sessionId;
     if (!sessionId) {
       throw Object.assign(new Error("missing sessionId"), { code: -32602 });
@@ -352,15 +443,7 @@ export class OzAcpAgent {
     let session = await this.restoreSession(sessionId);
     if (!session) {
       // Allow hosts that skip explicit new/load in tests: create ephemeral binding.
-      session = {
-        conversationId: null,
-        lastRunId: null,
-        modelId: null,
-        cwd: this.defaultCwd,
-        seenKeys: new Set(),
-        title: null,
-        activeAbort: null,
-      };
+      session = this.emptySession(this.defaultCwd);
       this.sessions.set(sessionId, session);
     }
 
@@ -384,8 +467,10 @@ export class OzAcpAgent {
         started = await ozAgentRun({
           prompt: promptText,
           cwd: session.cwd,
-          modelId: session.modelId,
+          modelId: this.resolvedModelId(session) ?? session.modelId,
           conversationId: session.conversationId,
+          profileId: session.profileId,
+          computerUse: session.computerUse,
           signal: abort.signal,
         });
       } catch (err) {

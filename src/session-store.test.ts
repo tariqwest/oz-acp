@@ -3,7 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { SessionStore, sessionFromStored } from "./session-store.ts";
+import {
+  SessionStore,
+  defaultStorePaths,
+  sessionFromStored,
+} from "./session-store.ts";
 import type { Session } from "./types.ts";
 
 async function tempPaths() {
@@ -16,14 +20,50 @@ async function tempPaths() {
   };
 }
 
+describe("defaultStorePaths", () => {
+  it("uses XDG_CONFIG_HOME/oz-acp when set", () => {
+    const paths = defaultStorePaths(
+      { XDG_CONFIG_HOME: "/custom/config", HOME: "/home/user" },
+      "/home/user",
+    );
+    assert.equal(paths.stateDir, path.join("/custom/config", "oz-acp"));
+    assert.equal(paths.stateFile, path.join("/custom/config", "oz-acp", "sessions.json"));
+    assert.equal(paths.lockFile, path.join("/custom/config", "oz-acp", "sessions.lock"));
+    assert.equal(
+      paths.modelsCacheFile,
+      path.join("/custom/config", "oz-acp", "models_cache.json"),
+    );
+  });
+
+  it("falls back to ~/.config/oz-acp when XDG_CONFIG_HOME is unset", () => {
+    const paths = defaultStorePaths({ HOME: "/home/user" }, "/home/user");
+    assert.equal(paths.stateDir, path.join("/home/user", ".config", "oz-acp"));
+    assert.equal(
+      paths.stateFile,
+      path.join("/home/user", ".config", "oz-acp", "sessions.json"),
+    );
+  });
+
+  it("ignores blank XDG_CONFIG_HOME", () => {
+    const paths = defaultStorePaths(
+      { XDG_CONFIG_HOME: "   ", HOME: "/home/user" },
+      "/home/user",
+    );
+    assert.equal(paths.stateDir, path.join("/home/user", ".config", "oz-acp"));
+  });
+});
+
 describe("SessionStore", () => {
   it("persists and restores sessions", async () => {
     const paths = await tempPaths();
     const store = new SessionStore(paths);
-    const session: Session = {
+const session: Session = {
       conversationId: "conv-1",
       lastRunId: "run-1",
-      modelId: "auto",
+      modelId: "claude-4-8-opus-high",
+      effort: "high",
+      profileId: "Unsynced",
+      computerUse: true,
       cwd: "/tmp/project",
       seenKeys: new Set(["a", "b"]),
       title: "Demo",
@@ -35,6 +75,9 @@ describe("SessionStore", () => {
     assert.ok(loaded);
     assert.equal(loaded.conversationId, "conv-1");
     assert.equal(loaded.lastRunId, "run-1");
+    assert.equal(loaded.effort, "high");
+    assert.equal(loaded.profileId, "Unsynced");
+    assert.equal(loaded.computerUse, true);
     assert.deepEqual(loaded.seenKeys, ["a", "b"]);
 
     const restored = sessionFromStored(loaded, "/fallback");

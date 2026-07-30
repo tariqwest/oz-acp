@@ -26,11 +26,12 @@ node bin/oz-acp.mjs        # same as published bin
 ## Architecture
 
 - `src/index.ts` — ACP SDK `ndJsonStream` + request handlers on stdio
-- `src/adapter.ts` — session lifecycle, models, prompt orchestration
+- `src/adapter.ts` — session lifecycle, models/config options, prompt orchestration
+- `src/config-options.ts` — ACP config option builders (model/effort/profile/computer_use)
 - `src/oz.ts` — spawn/parse `oz` CLI JSON
 - `src/stream.ts` — poll run + conversation until terminal state
 - `src/map.ts` — Oz conversation blocks → ACP `session/update` payloads
-- `src/session-store.ts` — `~/.openab/oz-acp/sessions.json` persistence
+- `src/session-store.ts` — `$XDG_CONFIG_HOME/oz-acp` persistence (default `~/.config/oz-acp`)
 - `src/types.ts` — zod schemas
 - `bin/oz-acp.mjs` — Node shebang, registers tsx, imports `src/index.ts`
 
@@ -38,8 +39,8 @@ node bin/oz-acp.mjs        # same as published bin
 
 | Path | Purpose |
 |---|---|
-| `~/.openab/oz-acp/sessions.json` | session → conversation/run/model bindings |
-| `~/.openab/oz-acp/models_cache.json` | cached `oz model list` ids |
+| `$XDG_CONFIG_HOME/oz-acp/sessions.json` (default `~/.config/oz-acp/sessions.json`) | session → conversation/run/model bindings |
+| `$XDG_CONFIG_HOME/oz-acp/models_cache.json` (default `~/.config/oz-acp/models_cache.json`) | cached `oz model list` ids |
 
 ## Oz CLI surface used
 

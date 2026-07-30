@@ -134,10 +134,25 @@ export const ConversationResponseSchema = z.object({
 });
 export type ConversationResponse = z.infer<typeof ConversationResponseSchema>;
 
+export const EffortLevelSchema = z.enum([
+  "no-reasoning",
+  "minimal-reasoning",
+  "minimal",
+  "xhigh",
+  "medium",
+  "high",
+  "low",
+  "max",
+]);
+export type EffortLevel = z.infer<typeof EffortLevelSchema>;
+
 export const StoredSessionSchema = z.object({
   conversationId: z.string().nullable().optional(),
   lastRunId: z.string().nullable().optional(),
   modelId: z.string().nullable().optional(),
+  effort: EffortLevelSchema.nullable().optional(),
+  profileId: z.string().nullable().optional(),
+  computerUse: z.boolean().nullable().optional(),
   cwd: z.string().optional(),
   seenKeys: z.array(z.string()).default([]),
   title: z.string().nullable().optional(),
@@ -153,6 +168,9 @@ export type Session = {
   conversationId: string | null;
   lastRunId: string | null;
   modelId: string | null;
+  effort: EffortLevel | null;
+  profileId: string | null;
+  computerUse: boolean | null;
   cwd: string;
   seenKeys: Set<string>;
   title: string | null;

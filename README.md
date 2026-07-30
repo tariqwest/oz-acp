@@ -80,7 +80,7 @@ TypeScript runs in-place via **tsx**:
 |---|---|
 | Use Oz from Zed’s Agent Panel | Register `oz-acp` as a custom agent server (below) |
 | Resume a prior chat | Host calls `session/load` / `session/resume` with the saved `sessionId` |
-| Pick an Oz model | Host model/config UI (`configId: "model"`) or `session/set_config_option` |
+| Pick model / effort / profile | Host config UI or `session/set_config_option` (`model`, `effort`, `profile`, `computer_use`) |
 | Cancel an in-flight turn | Host sends `session/cancel` |
 | Point Oz at a project directory | Host passes `cwd` on `session/new` (mapped to `oz agent run --cwd`) |
 
@@ -135,12 +135,23 @@ Hosts send prompts like:
 
 While the turn runs, the adapter emits `session/update` notifications, then answers the original request with a `stopReason`.
 
-### Model selection
+### Session config options
 
-On `initialize` / session setup, `oz-acp` runs `oz model list` and exposes models as ACP config options (`id: "model"`). Switch models from the host UI when supported, or via:
+On `initialize` / session setup, `oz-acp` loads `oz model list` and `oz agent profile list`, then exposes ACP `configOptions`:
 
-- `session/set_config_option` with `configId: "model"`
-- `session/set_model` / `session/setModel` aliases
+| `configId` | Type | Notes |
+|---|---|---|
+| `model` | select | Full Oz model id from `oz model list` |
+| `effort` | select | `low` / `medium` / `high` / `xhigh` / `max` (and related) when the current model family has effort-suffixed variants; rewriting the model id (e.g. `claude-4-8-opus-high` → `…-low`) |
+| `profile` | select | From `oz agent profile list` → `oz agent run --profile` |
+| `computer_use` | boolean | Passed via a temp agent config file as `computer_use_enabled` |
+
+Oz does **not** support a free-form `temperature` setting in agent config / CLI, so it is not exposed.
+
+Switch options from the host UI when supported, or via:
+
+- `session/set_config_option` with the `configId`s above
+- `session/set_model` / `session/setModel` aliases (model only)
 
 ### Extra Oz args
 
@@ -218,13 +229,14 @@ To inspect JSON-RPC traffic in Zed, use **dev: open acp logs** from the command 
 | `OZ_INSTALL_PATH` | Directory containing `oz` |
 | `OZ_EXTRA_ARGS` | Shell-style extra args prepended to every `oz` invocation |
 | `WARP_API_KEY` | API key (passed through to `oz`) |
-| `HOME` | Used for session persistence under `~/.openab/oz-acp/` |
+| `XDG_CONFIG_HOME` | Config root for session persistence (`$XDG_CONFIG_HOME/oz-acp`) |
+| `HOME` | Fallback config root when `XDG_CONFIG_HOME` is unset (`~/.config/oz-acp`) |
 
 ## Session persistence
 
-Sessions are stored at `~/.openab/oz-acp/sessions.json` (with a lock file). Bindings include `conversationId`, `lastRunId`, `modelId`, `cwd`, and emitted content keys for replay/delta.
+Sessions are stored at `$XDG_CONFIG_HOME/oz-acp/sessions.json` (default `~/.config/oz-acp/sessions.json`) with a lock file. Bindings include `conversationId`, `lastRunId`, `modelId`, `cwd`, and emitted content keys for replay/delta.
 
-Model IDs are cached at `~/.openab/oz-acp/models_cache.json`.
+Model IDs are cached at `$XDG_CONFIG_HOME/oz-acp/models_cache.json` (default `~/.config/oz-acp/models_cache.json`).
 
 ## How a prompt turn works
 

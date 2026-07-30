@@ -16,8 +16,14 @@ export type SessionStorePaths = {
   modelsCacheFile: string;
 };
 
-export function defaultStorePaths(home = process.env.HOME || os.homedir()): SessionStorePaths {
-  const stateDir = path.join(home, ".openab", "oz-acp");
+export function defaultStorePaths(
+  env: NodeJS.ProcessEnv = process.env,
+  home = env.HOME || os.homedir(),
+): SessionStorePaths {
+  const xdgConfigHome = env.XDG_CONFIG_HOME?.trim();
+  const stateDir = xdgConfigHome
+    ? path.join(xdgConfigHome, "oz-acp")
+    : path.join(home, ".config", "oz-acp");
   return {
     stateDir,
     stateFile: path.join(stateDir, "sessions.json"),
@@ -63,6 +69,9 @@ function storedFromSession(session: Session): StoredSession {
     conversationId: session.conversationId,
     lastRunId: session.lastRunId,
     modelId: session.modelId,
+    effort: session.effort,
+    profileId: session.profileId,
+    computerUse: session.computerUse,
     cwd: session.cwd,
     seenKeys: [...session.seenKeys],
     title: session.title,
@@ -77,6 +86,9 @@ export function sessionFromStored(
     conversationId: stored.conversationId ?? null,
     lastRunId: stored.lastRunId ?? null,
     modelId: stored.modelId ?? null,
+    effort: stored.effort ?? null,
+    profileId: stored.profileId ?? null,
+    computerUse: stored.computerUse ?? null,
     cwd: stored.cwd || fallbackCwd,
     seenKeys: new Set(stored.seenKeys ?? []),
     title: stored.title ?? null,

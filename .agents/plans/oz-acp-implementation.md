@@ -50,11 +50,11 @@ Keep the agy-acp shape, replace SQLite/protobuf with Oz JSON polling.
 * `src/oz.ts` — spawn/parse `oz` CLI (`whoami`, `model list`, `agent run`, `run get`, conversation get)
 * `src/stream.ts` — poll run state + conversation; emit ACP deltas
 * `src/map.ts` — Oz blocks → ACP updates (`text`→message chunks; `action`/`action_result`→`tool_call`/`tool_call_update`)
-* `src/session-store.ts` — locked persist/restore under `~/.openab/oz-acp/`
+* `src/session-store.ts` — locked persist/restore under `$XDG_CONFIG_HOME/oz-acp/` (default `~/.config/oz-acp/`)
 * `src/types.ts` — session + Oz response types (zod)
 * `src/**/*.test.ts` — unit tests; optional live e2e gated on env
 ### Session model
-Persist `~/.openab/oz-acp/sessions.json` (locked write, same pattern as agy-acp):
+Persist `$XDG_CONFIG_HOME/oz-acp/sessions.json` (default `~/.config/oz-acp/sessions.json`; locked write, same pattern as agy-acp):
 * `sessionId` (ACP UUID)
 * `conversation_id`
 * `last_run_id`

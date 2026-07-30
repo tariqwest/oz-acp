@@ -20,7 +20,7 @@
     "start": "tsx src/index.ts",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/map.test.ts src/session-store.test.ts",
+"test": "tsx --test src/map.test.ts src/session-store.test.ts src/config-options.test.ts",
     "oz-acp": "tsx src/index.ts"
   },
   "dependencies": {
