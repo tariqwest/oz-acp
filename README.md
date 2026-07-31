@@ -135,8 +135,8 @@ On `initialize` / session setup, `oz-acp` loads `oz model list` and `oz agent pr
 
 | `configId` | Type | Notes |
 |---|---|---|
-| `model` | select | Full Oz model id from `oz model list` |
-| `effort` | select | `low` / `medium` / `high` / `xhigh` / `max` (and related) when the current model family has effort-suffixed variants; rewriting the model id (e.g. `claude-4-8-opus-high` → `…-low`) |
+| `model` | select | One entry per model family (base name only). Effort variants like `claude-4-8-opus-high` collapse to `claude-4-8-opus`. |
+| `effort` | select | `low` / `medium` / `high` / `xhigh` / `max` (and related) when the current model family has effort-suffixed variants; rewriting the concrete Oz model id (e.g. `claude-4-8-opus-high` → `…-low`) |
 | `profile` | select | From `oz agent profile list` → `oz agent run --profile` |
 | `computer_use` | boolean | Passed via a temp agent config file as `computer_use_enabled` |
 
@@ -220,7 +220,7 @@ When the host renders ACP session config UI, `oz-acp` advertises:
 
 | `configId` | Type | Purpose |
 |---|---|---|
-| `model` | select | Oz model id (`oz model list`) |
+| `model` | select | Base model name (one entry per family from `oz model list`) |
 | `effort` | select | Reasoning effort when the model family has effort suffixes |
 | `profile` | select | Oz agent profile (`oz agent profile list`) |
 | `computer_use` | boolean | Enable computer use via agent config file |

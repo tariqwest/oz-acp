@@ -9,7 +9,9 @@ import {
   MODEL_CONFIG_ID,
   parseModelId,
   PROFILE_CONFIG_ID,
+  resolveModelSelection,
   resolveModelWithEffort,
+  uniqueModelBases,
 } from "./config-options.ts";
 
 const MODELS = [
@@ -73,6 +75,40 @@ describe("availableEffortsForModel", () => {
   });
 });
 
+describe("uniqueModelBases", () => {
+  it("collapses effort variants to one base entry", () => {
+    assert.deepEqual(uniqueModelBases(MODELS), [
+      "auto",
+      "claude-4-8-opus",
+      "gemini-3.6-flash",
+    ]);
+  });
+});
+
+describe("resolveModelSelection", () => {
+  it("expands a base model name with preferred or default effort", () => {
+    assert.deepEqual(resolveModelSelection("claude-4-8-opus", "high", MODELS), {
+      modelId: "claude-4-8-opus-high",
+      effort: "high",
+    });
+    assert.deepEqual(resolveModelSelection("claude-4-8-opus", null, MODELS), {
+      modelId: "claude-4-8-opus-medium",
+      effort: "medium",
+    });
+  });
+
+  it("preserves full catalog ids and effortless models", () => {
+    assert.deepEqual(
+      resolveModelSelection("claude-4-8-opus-max", "low", MODELS),
+      { modelId: "claude-4-8-opus-max", effort: "max" },
+    );
+    assert.deepEqual(resolveModelSelection("gemini-3.6-flash", "high", MODELS), {
+      modelId: "gemini-3.6-flash",
+      effort: null,
+    });
+  });
+});
+
 describe("buildSessionConfigOptions", () => {
   it("includes model, effort, profile, and computer_use when applicable", () => {
     const options = buildSessionConfigOptions({
@@ -90,6 +126,13 @@ describe("buildSessionConfigOptions", () => {
     });
     const byId = Object.fromEntries(options.map((o) => [o.id, o]));
     assert.equal(byId[MODEL_CONFIG_ID]?.type, "select");
+    assert.equal(byId[MODEL_CONFIG_ID]?.currentValue, "claude-4-8-opus");
+    assert.deepEqual(
+      byId[MODEL_CONFIG_ID]?.type === "select"
+        ? byId[MODEL_CONFIG_ID].options.map((o) => o.value)
+        : [],
+      ["auto", "claude-4-8-opus", "gemini-3.6-flash"],
+    );
     assert.equal(byId[EFFORT_CONFIG_ID]?.type, "select");
     assert.equal(byId[EFFORT_CONFIG_ID]?.currentValue, "high");
     assert.equal(byId[PROFILE_CONFIG_ID]?.currentValue, "yolo");
@@ -137,6 +180,18 @@ describe("applyConfigOptionValue", () => {
     });
     assert.equal(next.modelId, "claude-4-8-opus-max");
     assert.equal(next.effort, "max");
+  });
+
+  it("accepts collapsed base model names and keeps preferred effort", () => {
+    const next = applyConfigOptionValue({
+      configId: MODEL_CONFIG_ID,
+      value: "claude-4-8-opus",
+      state: baseState,
+      availableModels: MODELS,
+      profiles: [],
+    });
+    assert.equal(next.modelId, "claude-4-8-opus-high");
+    assert.equal(next.effort, "high");
   });
 
   it("updates effort and rewrites model id", () => {

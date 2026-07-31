@@ -5,7 +5,9 @@ import {
   applyConfigOptionValue,
   buildSessionConfigOptions,
   MODEL_CONFIG_ID,
+  modelBaseId,
   resolveModelWithEffort,
+  uniqueModelBases,
   type AgentProfile,
   type EffortLevel,
 } from "./config-options.ts";
@@ -129,10 +131,17 @@ export class OzAcpAgent {
 
   private sessionModelsJson(session: Session) {
     const models = this.availableModels.length ? this.availableModels : ["auto"];
-    const current = this.resolvedModelId(session) || models[0] || "auto";
+    const current =
+      this.resolvedModelId(session) || session.modelId || models[0] || "auto";
+    const currentBase = modelBaseId(current);
+    const bases = uniqueModelBases(models);
+    const available = bases.includes(currentBase)
+      ? bases
+      : [currentBase, ...bases];
     return {
-      currentModelId: current,
-      availableModels: models.map((id) => ({ modelId: id, name: id })),
+      // Host model pickers show base names only; effort is a separate config.
+      currentModelId: currentBase,
+      availableModels: available.map((base) => ({ modelId: base, name: base })),
     };
   }
 

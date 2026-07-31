@@ -138,6 +138,99 @@ export function availableEffortsForModel(
   return order.filter((e) => found.has(e));
 }
 
+/** Base model id with effort / -fast suffixes removed. */
+export function modelBaseId(modelId: string): string {
+  return parseModelId(modelId).base;
+}
+
+/**
+ * Unique base model ids in catalog order (first occurrence wins).
+ * Collapses effort variants like `…-low` / `…-high` into one entry.
+ */
+export function uniqueModelBases(availableModels: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of availableModels) {
+    const base = modelBaseId(id);
+    if (seen.has(base)) continue;
+    seen.add(base);
+    out.push(base);
+  }
+  return out;
+}
+
+const DEFAULT_EFFORT_PREFERENCE: EffortLevel[] = [
+  "medium",
+  "high",
+  "low",
+  "xhigh",
+  "max",
+  "minimal",
+  "minimal-reasoning",
+  "no-reasoning",
+];
+
+/** Pick a default effort for a family, preferring an existing selection when valid. */
+export function pickDefaultEffort(
+  efforts: EffortLevel[],
+  preferred?: EffortLevel | null,
+): EffortLevel | null {
+  if (!efforts.length) return null;
+  if (preferred && efforts.includes(preferred)) return preferred;
+  for (const effort of DEFAULT_EFFORT_PREFERENCE) {
+    if (efforts.includes(effort)) return effort;
+  }
+  return efforts[0] ?? null;
+}
+
+/**
+ * Resolve a host-selected model value (base or full catalog id) to a concrete
+ * Oz model id + effort. Accepts both collapsed base names and full variant ids.
+ */
+export function resolveModelSelection(
+  selectedModel: string,
+  effort: EffortLevel | null | undefined,
+  availableModels: string[],
+): { modelId: string; effort: EffortLevel | null } {
+  const raw = selectedModel.trim();
+  if (!raw) return { modelId: raw, effort: effort ?? null };
+
+  const available = new Set(availableModels);
+  const parsed = parseModelId(raw);
+  const base = parsed.base;
+  const efforts = availableEffortsForModel(base, availableModels);
+
+  // Exact catalog hit with an effort suffix — honor it.
+  if (available.has(raw) && parsed.effort) {
+    return { modelId: raw, effort: parsed.effort };
+  }
+
+  // Exact catalog hit with no effort family (e.g. auto, gemini-3.6-flash).
+  if (available.has(raw) && efforts.length === 0) {
+    return { modelId: raw, effort: null };
+  }
+
+  const nextEffort =
+    parsed.effort && efforts.includes(parsed.effort)
+      ? parsed.effort
+      : pickDefaultEffort(efforts, effort);
+
+  if (!nextEffort) {
+    if (available.has(base)) return { modelId: base, effort: null };
+    const match = availableModels.find((id) => modelBaseId(id) === base);
+    if (match) {
+      const matchParsed = parseModelId(match);
+      return { modelId: match, effort: matchParsed.effort };
+    }
+    return { modelId: raw, effort: effort ?? null };
+  }
+
+  return {
+    modelId: resolveModelWithEffort(base, nextEffort, availableModels),
+    effort: nextEffort,
+  };
+}
+
 export function effortLabel(effort: EffortLevel): string {
   switch (effort) {
     case "no-reasoning":
@@ -176,6 +269,11 @@ export function buildSessionConfigOptions(opts: {
   const models = opts.availableModels.length ? opts.availableModels : ["auto"];
   const currentModel = opts.state.modelId || models[0] || "auto";
   const parsed = parseModelId(currentModel);
+  const currentBase = parsed.base;
+  const modelBases = uniqueModelBases(models);
+  const modelSelectValues = modelBases.includes(currentBase)
+    ? modelBases
+    : [currentBase, ...modelBases];
   const efforts = availableEffortsForModel(currentModel, models);
   const currentEffort =
     opts.state.effort && efforts.includes(opts.state.effort)
@@ -190,8 +288,9 @@ export function buildSessionConfigOptions(opts: {
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: currentModel,
-      options: models.map((id) => ({ value: id, name: id })),
+      // Collapse effort variants: one entry per base, label is base name only.
+      currentValue: currentBase,
+      options: modelSelectValues.map((base) => ({ value: base, name: base })),
     },
   ];
 
@@ -260,9 +359,9 @@ export function applyConfigOptionValue(input: {
   if (configId === MODEL_CONFIG_ID) {
     const next = String(value);
     if (!next) throw invalid("empty model value");
-    modelId = next;
-    const parsed = parseModelId(next);
-    if (parsed.effort) effort = parsed.effort;
+    const resolved = resolveModelSelection(next, effort, models);
+    modelId = resolved.modelId;
+    effort = resolved.effort;
     return { modelId, effort, profileId, computerUse };
   }
 

@@ -55,6 +55,7 @@ pnpm release <ver>         # GitHub release; add --npm to publish
 ## Notes
 
 - ACP protocol version 1 (Zed-compatible): `session/prompt` returns `stopReason`.
+- Model pickers expose one base name per family (`claude-4-8-opus`); effort is a separate config option that maps back to Oz ids like `claude-4-8-opus-high`.
 - `oz run message watch` is agent-inbox messaging, not used for transcript streaming.
 - Cancellation aborts in-flight CLI children via `AbortSignal`; remote run cancel API is out of MVP.
 - Keep stderr logging only — stdout is the ACP transport.
