@@ -29,47 +29,40 @@ If `oz whoami` fails, run `oz login` first.
 
 ## Setup
 
-From the repo root:
+### Run without installing (happy path)
 
 ```bash
-# 1. Install dependencies
-pnpm install
+# from GitHub (no local clone required)
+npx -y https://github.com/tariqwest/oz-acp
 
-# 2. Ensure the bin is executable
-chmod +x bin/oz-acp.mjs
+# after the package is on npm
+npx -y oz-acp
+```
 
-# 3. Smoke-check the adapter (stdio JSON-RPC)
+### Install the CLI
+
+```bash
+# from GitHub
+npm install -g https://github.com/tariqwest/oz-acp
+# after npm publish
+npm install -g oz-acp
+
+oz-acp   # on PATH
+```
+
+### Smoke-check (stdio JSON-RPC)
+
+```bash
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}' \
-  | node bin/oz-acp.mjs
+  | npx -y https://github.com/tariqwest/oz-acp
+# or: oz-acp
 ```
 
 You should see a JSON-RPC result with `"agentInfo":{"name":"oz",...}` on stdout. Diagnostic logs go to stderr only.
 
-### Optional: put `oz-acp` on your PATH
-
-```bash
-# link this checkout globally
-pnpm link --global
-oz-acp   # now available as a command
-
-# or run without linking
-pnpm exec oz-acp
-node bin/oz-acp.mjs
-```
-
-After publish (or from a path install):
-
-```bash
-npx oz-acp
-```
-
 ### No compile step
 
-TypeScript runs in-place via **tsx**:
-
-- `bin/oz-acp.mjs` spawns `node --import tsx src/index.ts`
-- `tsx` is a **runtime** dependency so cold `npx`/global installs work
-- `pnpm typecheck` (`tsc --noEmit`) is optional and not required to run
+TypeScript runs in-place via **tsx** (a runtime dependency), so `npx` / global installs work with no `tsc` emit. `pnpm typecheck` is optional for contributors.
 
 ## Usage
 
@@ -100,9 +93,9 @@ Supported agent methods include: `initialize`, `session/new`, `session/load`, `s
 
 ```bash
 # stdio server — host would attach here
-node bin/oz-acp.mjs
+oz-acp
 # or
-pnpm exec oz-acp
+npx -y https://github.com/tariqwest/oz-acp
 ```
 
 Smoke without a full host:
@@ -111,7 +104,7 @@ Smoke without a full host:
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}' \
   '{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"'"$(pwd)"'","mcpServers":[]}}' \
-  | node bin/oz-acp.mjs
+  | npx -y https://github.com/tariqwest/oz-acp
 ```
 
 Expect JSON-RPC responses for `initialize` and `session/new` on stdout. Keep logs on stderr only—stdout is the ACP transport.
@@ -156,80 +149,74 @@ Switch options from the host UI when supported, or via:
 
 ### Extra Oz args
 
-Pass extra CLI flags to every `oz` invocation with `OZ_EXTRA_ARGS`:
+Pass extra CLI flags to every `oz` invocation with `OZ_EXTRA_ARGS` in the agent `env` (or your shell):
 
 ```bash
-OZ_EXTRA_ARGS='--debug' node bin/oz-acp.mjs
+OZ_EXTRA_ARGS='--debug' oz-acp
 ```
 
 ## Host setup
 
-`oz-acp` is an **ACP agent server** (stdio JSON-RPC). Hosts spawn it as a subprocess. Auth for Oz stays with Warp (`oz login` or `WARP_API_KEY`) — not the host’s Claude/Codex/Cursor/Copilot subscription.
+`oz-acp` is an **ACP agent server** (stdio JSON-RPC). Hosts spawn it as a subprocess. Auth for Oz stays with Warp (`oz login` or `WARP_API_KEY`) — not Claude / Codex / Cursor / Copilot / Devin subscriptions.
 
-Prefer an **absolute path** to `bin/oz-acp.mjs` (or a global `oz-acp` on `PATH`). GUI apps often do not inherit your shell `PATH`.
+### How to launch oz-acp
 
-### Shared agent definition
+Use one of these (no local clone required):
 
-Most hosts use a Zed-style `agent_servers` entry:
+| Situation | `command` | `args` |
+|---|---|---|
+| Installed globally (`npm i -g …` / on `PATH`) | `oz-acp` | `[]` |
+| Not installed yet (GitHub) | `npx` | `["-y", "https://github.com/tariqwest/oz-acp"]` |
+| Published on npm | `npx` | `["-y", "oz-acp"]` |
+
+GUI hosts often have a thin `PATH`; if `oz-acp` is not found, prefer the `npx` form.
+
+### Generic ACP agent definition
+
+Most ACP hosts share the same spawn shape (`command` + `args` + optional `env`). Only the **settings file / key** differs.
+
+**Recommended (works without a prior install):**
 
 ```json
 {
-  "agent_servers": {
-    "oz": {
-      "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {
-        "WARP_API_KEY": "your-key-if-needed",
-        "OZ_EXTRA_ARGS": ""
-      }
+  "oz": {
+    "type": "custom",
+    "command": "npx",
+    "args": ["-y", "https://github.com/tariqwest/oz-acp"],
+    "env": {
+      "WARP_API_KEY": "your-key-if-needed"
     }
   }
 }
 ```
+
+**If `oz-acp` is already on PATH:**
+
+```json
+{
+  "oz": {
+    "type": "custom",
+    "command": "oz-acp",
+    "args": [],
+    "env": {}
+  }
+}
+```
+
+**After npm publish**, you can use `"args": ["-y", "oz-acp"]` with `npx` instead of the GitHub URL.
 
 | Field | Required | Notes |
 |---|---|---|
-| `command` | yes | `node`, `oz-acp`, or absolute path to the bin |
-| `args` | no | e.g. `["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"]` when `command` is `node` |
-| `env` | no | Passed to the agent process (`WARP_API_KEY`, `OZ_*`, …) |
-| `type` | recommended | `"custom"` for hand-configured agents |
-| `cwd` | optional | Some hosts (VS Code ACP clients) support a process working directory |
-| `name` | optional | Display name when the key is not enough |
-
-**If `oz-acp` is on PATH:**
-
-```json
-{
-  "agent_servers": {
-    "oz": {
-      "type": "custom",
-      "command": "oz-acp",
-      "args": [],
-      "env": {}
-    }
-  }
-}
-```
-
-**After npm publish / without a local checkout:**
-
-```json
-{
-  "agent_servers": {
-    "oz": {
-      "type": "custom",
-      "command": "npx",
-      "args": ["-y", "oz-acp"],
-      "env": {}
-    }
-  }
-}
-```
+| `command` | yes | `oz-acp` or `npx` |
+| `args` | no | empty for global install; `npx` args as above |
+| `env` | no | `WARP_API_KEY`, `OZ_*`, … |
+| `type` | recommended | `"custom"` where the host distinguishes registry vs custom |
+| `name` | optional | Display name when the map key is not shown |
+| `cwd` | optional | Some VS Code clients support a process working directory |
 
 ### Session config options (all hosts)
 
-When the host supports ACP session config UI, `oz-acp` advertises:
+When the host renders ACP session config UI, `oz-acp` advertises:
 
 | `configId` | Type | Purpose |
 |---|---|---|
@@ -240,62 +227,28 @@ When the host supports ACP session config UI, `oz-acp` advertises:
 
 Hosts without a config UI can still call `session/set_config_option` / `session/set_model` over ACP.
 
-### Zed
+### Hosts using generic `agent_servers` / `acp.agents`
 
-Edit `~/.config/zed/settings.json` (or **Agent Settings → External Agents → Add Custom Agent**).
+These clients all take the same spawn object. Paste the generic definition under the key your host reads:
 
-```json
-{
-  "agent_servers": {
-    "oz": {
-      "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {}
-    }
-  }
-}
-```
+| Host | Config location | Settings key |
+|---|---|---|
+| **Zed** | `~/.config/zed/settings.json` (or Agent Settings → External Agents → Add Custom Agent) | `agent_servers` |
+| **JetBrains** AI Assistant | `~/.jetbrains/acp.json` (AI Chat → Add Custom Agent) | `agent_servers` (plus optional `default_mcp_settings`) |
+| **VS Code** [ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) | User/workspace `settings.json` | `acp.agents` |
+| **VS Code** [ACP plugin](https://marketplace.visualstudio.com/items?itemName=strato-space.acp-plugin) | User/workspace `settings.json` | `agent_servers` (alias: `acp.agents`) |
+| **VS Code** [Multicoder](https://marketplace.visualstudio.com/items?itemName=multicoder.multicoder) | User/workspace `settings.json` | `multicoder.agentServers` |
+| Other ACP clients | Host docs | Usually `agent_servers` or equivalent |
 
-Then:
-
-1. Open the Agent Panel (`Cmd-?` on macOS)
-2. Select **oz** from the new-thread / agent menu
-3. Chat in a project workspace (that directory becomes session `cwd`)
-
-Debug: command palette → **dev: open acp logs**.
-
-Docs: [Zed External Agents](https://zed.dev/docs/ai/external-agents).
-
-### VS Code / GitHub Copilot
-
-VS Code does not ship a built-in ACP host for arbitrary agents. Use an ACP client extension, then add `oz` as a custom agent.
-
-Popular clients:
-
-- [ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) (`formulahendry.acp-client`) — settings key `acp.agents`
-- [ACP — Agent Client Protocol](https://marketplace.visualstudio.com/items?itemName=strato-space.acp-plugin) (`strato-space.acp-plugin`) — prefers root `agent_servers` (also accepts `acp.agents`)
-- [Multicoder](https://marketplace.visualstudio.com/items?itemName=multicoder.multicoder) — settings key `multicoder.agentServers`
-
-**User or workspace `settings.json` (ACP Client / Zed-compatible shape):**
+**Example (Zed / JetBrains / VS Code ACP plugin):**
 
 ```json
 {
   "agent_servers": {
     "oz": {
       "type": "custom",
-      "name": "Oz",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {
-        "WARP_API_KEY": "your-key-if-needed"
-      }
-    }
-  },
-  "acp.agents": {
-    "oz": {
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
+      "command": "npx",
+      "args": ["-y", "https://github.com/tariqwest/oz-acp"],
       "env": {
         "WARP_API_KEY": "your-key-if-needed"
       }
@@ -304,38 +257,37 @@ Popular clients:
 }
 ```
 
-You only need the key your extension reads (`agent_servers` and/or `acp.agents`). Some clients expand `${workspaceFolder}`, `${userHome}`, and `${env:NAME}` in `command` / `args` / `cwd`.
-
-**Multicoder:**
+**JetBrains** wraps the same entry with MCP defaults:
 
 ```json
 {
-  "multicoder.agentServers": {
+  "default_mcp_settings": {},
+  "agent_servers": {
     "Oz": {
-      "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {}
+      "command": "npx",
+      "args": ["-y", "https://github.com/tariqwest/oz-acp"],
+      "env": {
+        "WARP_API_KEY": "your-key-if-needed"
+      }
     }
   }
 }
 ```
 
-Then open the extension’s ACP/chat view, connect to **oz**, and start a session. Session config options (`model`, `effort`, …) appear in the composer when the client renders ACP `configOptions`.
+**VS Code ACP Client** (`acp.agents`) and **Multicoder** (`multicoder.agentServers`) use the same inner object; only the outer key name changes.
 
-**GitHub Copilot note:** Copilot’s own agent (`npx @github/copilot-language-server --acp`) is a separate ACP *agent*. To drive **Warp Oz** from VS Code, use an ACP *client* extension and register `oz-acp` as above — not the Copilot agent preset.
+Then open the host’s agent/chat UI, select **oz** / **Oz**, and start a session in a project workspace (that directory becomes session `cwd`).
 
-### Claude Code
+| Host tips |
+|---|
+| **Zed** — Agent Panel (`Cmd-?` on macOS). Debug: **dev: open acp logs**. Docs: [External Agents](https://zed.dev/docs/ai/external-agents). |
+| **JetBrains** — AI Chat agent picker. Prefer `npx` if the IDE’s `PATH` is thin. |
+| **VS Code** — Install an ACP *client* extension first; stock VS Code/Copilot Chat does not host arbitrary ACP agents. |
+| **GitHub Copilot** — Copilot’s own ACP binary (`@github/copilot-language-server --acp`) is a different *agent*. To run **Warp Oz**, register `oz-acp` in an ACP client extension as above. |
 
-Claude Code is primarily an ACP **agent** (for example via `@zed-industries/claude-agent-acp` / `@agentclientprotocol/claude-agent-acp`). It does not replace an ACP host.
+### Alongside Claude Code, Codex, Cursor, OpenCode
 
-To use **Oz** alongside Claude Code:
-
-1. Keep Claude Code as its own agent (registry or custom entry).
-2. Add the shared `oz` `agent_servers` entry in the **same host** (Zed, VS Code ACP client, JetBrains, …).
-3. Switch agents in the host UI; do not expect Claude Code’s CLI to spawn `oz-acp` as a sub-agent unless you wire that yourself.
-
-Example Zed settings with both agents:
+Those products are usually ACP **agents** (or their own apps), not hosts for `oz-acp`. To use Oz **next to** them, register both in the same ACP host:
 
 ```json
 {
@@ -345,82 +297,16 @@ Example Zed settings with both agents:
       "command": "npx",
       "args": ["-y", "@zed-industries/claude-agent-acp"]
     },
-    "oz": {
-      "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {}
-    }
-  }
-}
-```
-
-Oz model/effort/profile options remain oz-acp’s ACP `configOptions`; Claude’s models stay with the Claude agent.
-
-### Codex
-
-Codex CLI is also typically an ACP **agent** (for example `npx @zed-industries/codex-acp`). Same pattern as Claude: register **oz** next to Codex in your host.
-
-```json
-{
-  "agent_servers": {
     "codex": {
       "type": "custom",
       "command": "npx",
       "args": ["-y", "@zed-industries/codex-acp"]
     },
-    "oz": {
-      "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {}
-    }
-  }
-}
-```
-
-Codex-native settings stay in `~/.codex/config.toml`. Oz settings are only what `oz-acp` exposes over ACP (`model`, `effort`, `profile`, `computer_use`) plus env vars below.
-
-### Cursor
-
-Cursor’s desktop app runs its own agent. Cursor CLI can act as an ACP **agent** (`agent acp` / `cursor-agent acp`) for *other* hosts — it is not a general host for custom agents like `oz-acp`.
-
-To use Oz from a Cursor-centric workflow:
-
-1. Prefer an ACP host that accepts custom agents (Zed, VS Code ACP extension, JetBrains ACP, Multicoder, …) and add the shared `oz` entry there; or
-2. Drive `oz-acp` with any custom ACP client over stdio (see [Usage](#usage)).
-
-Example of registering Oz in Zed while also having Cursor available as an external agent:
-
-```json
-{
-  "agent_servers": {
     "cursor": {
       "type": "custom",
       "command": "agent",
       "args": ["acp"]
     },
-    "oz": {
-      "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {}
-    }
-  }
-}
-```
-
-Cursor auth (`agent login` / `CURSOR_API_KEY`) does not authenticate Oz; still use `oz login` or `WARP_API_KEY`.
-
-### OpenCode
-
-OpenCode can run as an ACP agent (`opencode acp` / `npx opencode-ai@latest acp`) and many hosts list it in the ACP registry. To use **Warp Oz** instead of (or beside) OpenCode, add the custom `oz` server in the host — OpenCode does not need to wrap oz-acp.
-
-**Zed / VS Code-style:**
-
-```json
-{
-  "agent_servers": {
     "opencode": {
       "type": "custom",
       "command": "npx",
@@ -428,30 +314,30 @@ OpenCode can run as an ACP agent (`opencode acp` / `npx opencode-ai@latest acp`)
     },
     "oz": {
       "type": "custom",
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
+      "command": "npx",
+      "args": ["-y", "https://github.com/tariqwest/oz-acp"],
       "env": {}
     }
   }
 }
 ```
 
-If your OpenCode build or host supports custom agent plugins that spawn arbitrary ACP stdio servers, point that plugin at the same `command` / `args` / `env` as the shared definition above.
+Switch agents in the host UI. Native config stays with each product (`~/.codex/config.toml`, Cursor login, etc.); Oz options are only ACP `configOptions` + env vars below.
+
+**Cursor desktop** does not host custom ACP agents—use Cursor CLI as an agent in another host, or run `oz-acp` from Zed / VS Code / JetBrains / Devin Desktop.
 
 ### Devin Desktop
 
-[Devin Desktop](https://docs.devin.ai/desktop/acp) hosts third-party ACP agents in the Agent Command Center. Custom agents are registered via a **local ACP registry** (not Zed’s `agent_servers` JSON), then enabled in settings.
+[Devin Desktop](https://docs.devin.ai/desktop/acp) uses an **ACP registry file** (not `agent_servers`), then an enable toggle.
 
-Registry files:
-
-| Build | Path |
+| Build | Registry path |
 |---|---|
 | Devin Desktop | `~/.windsurf/acp/registry.json` |
 | Devin Desktop Next | `~/.windsurf-next/acp/registry.json` |
 
-Command palette → **Open Local ACP Registry Config** also opens the file. Format follows the [ACP registry](https://agentclientprotocol.com/get-started/registry) shape. Devin Desktop expects the agent binary already installed; it launches via `cmd` / `args` and does not download `archive` URLs today.
+Command palette → **Open Local ACP Registry Config**. Schema: [ACP registry](https://agentclientprotocol.com/get-started/registry). Devin launches via `cmd` / `args` (it does not fetch `archive` URLs today).
 
-**Sample local registry entry for oz-acp** (adjust paths for your machine/OS):
+**Sample entry** (GitHub via `npx`; swap to `"cmd": "oz-acp", "args": []` if installed globally):
 
 ```json
 {
@@ -468,33 +354,33 @@ Command palette → **Open Local ACP Registry Config** also opens the file. Form
         "binary": {
           "darwin-aarch64": {
             "archive": "",
-            "cmd": "node",
-            "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"]
+            "cmd": "npx",
+            "args": ["-y", "https://github.com/tariqwest/oz-acp"]
           },
           "darwin-x86_64": {
             "archive": "",
-            "cmd": "node",
-            "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"]
+            "cmd": "npx",
+            "args": ["-y", "https://github.com/tariqwest/oz-acp"]
           },
           "linux-aarch64": {
             "archive": "",
-            "cmd": "node",
-            "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"]
+            "cmd": "npx",
+            "args": ["-y", "https://github.com/tariqwest/oz-acp"]
           },
           "linux-x86_64": {
             "archive": "",
-            "cmd": "node",
-            "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"]
+            "cmd": "npx",
+            "args": ["-y", "https://github.com/tariqwest/oz-acp"]
           },
           "windows-aarch64": {
             "archive": "",
-            "cmd": "node",
-            "args": ["C:\\ABS\\PATH\\TO\\oz-acp\\bin\\oz-acp.mjs"]
+            "cmd": "npx",
+            "args": ["-y", "https://github.com/tariqwest/oz-acp"]
           },
           "windows-x86_64": {
             "archive": "",
-            "cmd": "node",
-            "args": ["C:\\ABS\\PATH\\TO\\oz-acp\\bin\\oz-acp.mjs"]
+            "cmd": "npx",
+            "args": ["-y", "https://github.com/tariqwest/oz-acp"]
           }
         }
       }
@@ -504,57 +390,25 @@ Command palette → **Open Local ACP Registry Config** also opens the file. Form
 }
 ```
 
-If `oz-acp` is on `PATH`, you can set `"cmd": "oz-acp"` and `"args": []` instead of going through `node`.
+Enable:
 
-Then enable the agent:
+1. **Devin User Settings** → **Agents** → toggle **Oz**
+2. Restart Devin Desktop (or **Reload ACP Connections**)
+3. New conversation → pick **Oz**
 
-1. Command palette → **Devin User Settings** → **Agents**
-2. Toggle on **Oz** / `oz-acp`
-3. Restart Devin Desktop (or run **Reload ACP Connections** while iterating)
-4. Start a **new** conversation and pick **Oz** from the agent selector
-
-**Environment variables** (Warp auth, `OZ_BIN_PATH`, etc.):
-
-- Agents tab → **…** menu for the agent, or
-- `devin.acp.agentEnv.oz-acp` in Devin Desktop `settings.json` (key matches the registry `id`)
+Env (`WARP_API_KEY`, `OZ_BIN_PATH`, …): Agents tab **…** menu, or:
 
 ```json
 {
   "devin.acp.agentEnv.oz-acp": {
-    "WARP_API_KEY": "your-key-if-needed",
-    "OZ_BIN_PATH": "/ABS/PATH/TO/oz"
+    "WARP_API_KEY": "your-key-if-needed"
   }
 }
 ```
 
-**Notes:**
+Notes: Warp handles Oz billing/privacy; Devin only hosts the session. Session **modes** are not in Devin’s UI—use oz-acp `configOptions`. Team admins can push a shared registry via **ACP Registry Config**.
 
-- Billing/privacy for Oz stay with Warp; Devin Desktop only hosts the ACP session.
-- Session **modes** are not exposed in Devin Desktop’s UI; use oz-acp’s ACP `configOptions` (`model`, `effort`, `profile`, `computer_use` — categories like `mode` / `model` / `thought_level` as advertised).
-- Team admins can push a shared registry via **ACP Registry Config** in Devin team settings.
-
-Docs: [Devin Desktop ACP](https://docs.devin.ai/desktop/acp), [custom ACP agents](https://docs.devin.ai/desktop/acp-custom).
-
-### JetBrains (bonus)
-
-JetBrains AI Assistant uses `~/.jetbrains/acp.json`:
-
-```json
-{
-  "default_mcp_settings": {},
-  "agent_servers": {
-    "Oz": {
-      "command": "node",
-      "args": ["/ABS/PATH/TO/oz-acp/bin/oz-acp.mjs"],
-      "env": {
-        "WARP_API_KEY": "your-key-if-needed"
-      }
-    }
-  }
-}
-```
-
-Use absolute paths; the IDE process often has a restricted `PATH`.
+Docs: [Devin Desktop ACP](https://docs.devin.ai/desktop/acp), [custom agents](https://docs.devin.ai/desktop/acp-custom).
 
 ## Environment variables
 
@@ -596,19 +450,24 @@ Create a GitHub release (tag + `gh release`), optionally publishing to npm:
 
 ```bash
 # dry-run (no git/gh/npm changes)
-pnpm release -- 0.1.1 --dry-run
+pnpm release 0.1.1 --dry-run
 
 # GitHub release only
-pnpm release -- 0.1.1
+pnpm release 0.1.1
 
 # GitHub release + npm publish
-pnpm release -- 0.1.1 --npm
+pnpm release 0.1.1 --npm
+# or: node scripts/release.mjs 0.1.1 --npm --yes
 
 # bump from package.json (patch|minor|major) and release
-pnpm release -- patch --npm
+pnpm release patch --npm
 ```
 
-Requires a clean git worktree, `gh` auth, and (for `--npm`) npm auth. See `node scripts/release.mjs --help`.
+Requires a clean git worktree and `gh` auth. For `--npm` also run `npm login` (or `pnpm login`) first. OTP: `--otp 123456`.
+
+Package publish surface: `bin/`, non-test `src/`, `README.md`, `AGENTS.md`, `LICENSE` (see `package.json` `files` + `.npmignore`). `prepublishOnly` runs tests and typecheck.
+
+See `node scripts/release.mjs --help`.
 
 Project layout:
 
@@ -632,7 +491,7 @@ Project layout:
 | Devin Desktop missing Oz | Add registry entry under `~/.windsurf/acp/registry.json`, enable in **Agents**, restart or **Reload ACP Connections** |
 | Empty model list | Network/auth; cache falls back to `auto` |
 | Host shows no agent output | Ensure stdout is reserved for JSON-RPC (logs are on stderr only) |
-| Host cannot start agent | Absolute path to `bin/oz-acp.mjs`; Node 20+; GUI apps may not see shell `PATH` |
+| Host cannot start agent | Node 20+; use `npx -y https://github.com/tariqwest/oz-acp` if `oz-acp` is not on the host `PATH` |
 | Agent missing in VS Code | Install an ACP client extension; use the settings key it documents (`agent_servers`, `acp.agents`, or `multicoder.agentServers`) |
 | No model/effort UI | Host must render ACP `configOptions`; otherwise call `session/set_config_option` |
 | Prompt hangs / no updates | Confirm `oz whoami` works and the account has credits |

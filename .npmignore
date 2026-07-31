@@ -8,6 +8,9 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 coverage/
 dist/
+*.tgz
 *.log
 .env
 .env.*
+.github/
+graphify-out/

@@ -21,7 +21,7 @@ pnpm start                 # tsx src/index.ts (stdio ACP server)
 pnpm test                  # tsx --test
 pnpm typecheck             # tsc --noEmit
 node bin/oz-acp.mjs        # same as published bin
-pnpm release -- <ver>      # GitHub release; add --npm to publish
+pnpm release <ver>         # GitHub release; add --npm to publish
 ```
 
 ## Architecture

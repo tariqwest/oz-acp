@@ -7,12 +7,13 @@
   "bin": {
     "oz-acp": "./bin/oz-acp.mjs"
   },
-"files": [
+  "files": [
     "bin",
     "src",
     "!src/**/*.test.ts",
     "README.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -24,7 +25,9 @@
     "test": "tsx --test src/map.test.ts src/session-store.test.ts src/config-options.test.ts",
     "oz-acp": "tsx src/index.ts",
     "release": "node scripts/release.mjs",
-    "release:dry": "node scripts/release.mjs --dry-run"
+    "release:dry": "node scripts/release.mjs --dry-run",
+    "prepack": "pnpm test && pnpm typecheck",
+    "prepublishOnly": "pnpm test && pnpm typecheck"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
@@ -34,5 +37,29 @@
   "devDependencies": {
     "@types/node": "^24.3.0",
     "typescript": "^5.9.2"
+  },
+  "author": "Tariq West",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tariqwest/oz-acp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tariqwest/oz-acp/issues"
+  },
+  "homepage": "https://github.com/tariqwest/oz-acp#readme",
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "oz",
+    "warp",
+    "zed",
+    "stdio",
+    "cli",
+    "agent"
+  ],
+  "packageManager": "pnpm@11.18.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

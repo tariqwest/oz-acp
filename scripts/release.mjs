@@ -4,14 +4,15 @@
  *
  * Usage:
  *   node scripts/release.mjs [version] [options]
- *   pnpm release -- [version] [options]
+ *   pnpm release [version] [options]
+ *   pnpm release -- [version] [options]   # also works; bare -- is ignored
  *
  * Examples:
- *   pnpm release -- 0.1.1
- *   pnpm release -- 0.2.0 --npm
- *   pnpm release -- --npm                 # use package.json version
- *   pnpm release -- 0.1.1 --dry-run
- *   pnpm release -- patch --npm           # npm version bump style: patch|minor|major
+ *   pnpm release 0.1.1
+ *   pnpm release 0.2.0 --npm
+ *   pnpm release --npm                    # use package.json version
+ *   pnpm release 0.1.1 --dry-run
+ *   pnpm release patch --npm              # npm version bump style: patch|minor|major
  *
  * Options:
  *   --npm              Publish to npm after creating the GitHub release
@@ -82,6 +83,8 @@ function parseArgs(argv) {
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    // pnpm may forward a bare "--" separator; ignore it.
+    if (a === "--") continue;
     if (a === "--help" || a === "-h") usage(0);
     if (a === "--npm") {
       opts.npm = true;
@@ -325,14 +328,40 @@ function ensureGitReady({ dryRun }) {
   return { branch };
 }
 
-function ensureTools() {
+function ensureTools({ npm }) {
   requireCmd("pnpm");
   requireCmd("gh");
+  if (npm) requireCmd("npm");
 }
 
 function ensureGhAuth() {
   const res = capture("gh", ["auth", "status"], { allowFail: true });
   if (res.status !== 0) fail("gh is not authenticated; run `gh auth login`");
+}
+
+function ensureNpmAuth() {
+  // Prefer npm whoami against the default registry; pnpm whoami works too.
+  const npm = capture("npm", ["whoami"], { allowFail: true });
+  if (npm.status === 0 && npm.stdout) {
+    console.log(`npm authenticated as ${npm.stdout}`);
+    return;
+  }
+  const pnpmWho = capture("pnpm", ["whoami"], { allowFail: true });
+  if (pnpmWho.status === 0 && pnpmWho.stdout) {
+    console.log(`npm authenticated as ${pnpmWho.stdout}`);
+    return;
+  }
+  fail("not logged in to npm; run `npm login` (or `pnpm login`) before --npm");
+}
+
+function assertPackagePublishable(pkg) {
+  if (pkg.private) fail("package.json has \"private\": true; refusing to publish");
+  if (!pkg.name) fail("package.json missing name");
+  if (!pkg.version) fail("package.json missing version");
+  if (!pkg.license) fail("package.json missing license");
+  if (!pkg.bin && !pkg.main && !pkg.exports) {
+    console.warn("warning: package.json has no bin/main/exports; package may be empty for consumers");
+  }
 }
 
 function tagExistsLocally(tag) {
@@ -374,11 +403,13 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   process.chdir(ROOT);
 
-  ensureTools();
+  ensureTools({ npm: opts.npm });
   const { branch } = ensureGitReady({ dryRun: opts.dryRun });
   ensureGhAuth();
 
   const pkg = readPackage();
+  assertPackagePublishable(pkg);
+  if (opts.npm && !opts.dryRun) ensureNpmAuth();
   const currentVersion = pkg.version;
   if (!parseSemver(currentVersion)) fail(`package.json version is not valid semver: ${currentVersion}`);
 
@@ -476,14 +507,15 @@ async function main() {
   if (opts.npm) {
     step("Publishing to npm");
     // Use pnpm publish (this repo is pnpm-first). --no-git-checks because we already
-    // created/pushed the release tag ourselves.
+    // created/pushed the release tag ourselves. Access comes from publishConfig too.
     const publishArgs = ["publish", "--access", "public", "--no-git-checks"];
     if (opts.otp) publishArgs.push("--otp", opts.otp);
     if (opts.dryRun) {
       console.log(`[dry-run] pnpm ${publishArgs.join(" ")}`);
-      console.log(`[dry-run] pnpm pack --dry-run`);
+      console.log("[dry-run] pnpm pack --dry-run");
       run("pnpm", ["pack", "--dry-run"]);
     } else {
+      run("pnpm", ["pack", "--dry-run"]);
       run("pnpm", publishArgs);
     }
   }

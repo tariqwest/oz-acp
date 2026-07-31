@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
@@ -25,7 +26,9 @@ import { SessionStore, sessionFromStored } from "./session-store.ts";
 import { pollRunTurn } from "./stream.ts";
 import type { Session } from "./types.ts";
 
-const PACKAGE_VERSION = "0.1.0";
+const require = createRequire(import.meta.url);
+const PACKAGE_VERSION: string =
+  (require("../package.json") as { version?: string }).version ?? "0.0.0";
 const MAX_SESSIONS = 64;
 
 type AgentContext = {
