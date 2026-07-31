@@ -265,6 +265,10 @@ export function buildSessionConfigOptions(opts: {
   availableModels: string[];
   profiles: AgentProfile[];
   state: SessionConfigState;
+  /** Optional id → display label map (e.g. UUID custom models). */
+  modelLabels?: Record<string, string>;
+  /** Resolves display names; defaults to identity. */
+  modelDisplayName?: (modelId: string) => string;
 }): SessionConfigOption[] {
   const models = opts.availableModels.length ? opts.availableModels : ["auto"];
   const currentModel = opts.state.modelId || models[0] || "auto";
@@ -281,6 +285,12 @@ export function buildSessionConfigOptions(opts: {
       : parsed.effort && efforts.includes(parsed.effort)
         ? parsed.effort
         : efforts[0] ?? null;
+  const labelOf =
+    opts.modelDisplayName ??
+    ((id: string) => {
+      const labels = opts.modelLabels ?? {};
+      return labels[id] || id;
+    });
 
   const options: SessionConfigOption[] = [
     {
@@ -288,9 +298,12 @@ export function buildSessionConfigOptions(opts: {
       name: "Model",
       category: "model",
       type: "select",
-      // Collapse effort variants: one entry per base, label is base name only.
+      // Collapse effort variants: one entry per base; name may be a user label.
       currentValue: currentBase,
-      options: modelSelectValues.map((base) => ({ value: base, name: base })),
+      options: modelSelectValues.map((base) => ({
+        value: base,
+        name: labelOf(base),
+      })),
     },
   ];
 

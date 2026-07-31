@@ -142,22 +142,31 @@ On `initialize` / session setup, `oz-acp` loads `oz model list` and `oz agent pr
 
 Oz does **not** support a free-form `temperature` setting in agent config / CLI, so it is not exposed.
 
-#### Known gap: custom / BYO model labels
+#### Custom / BYO model labels (UUID ids)
 
-`oz model list --output-format json` currently returns **only** `{ "id": "..." }` entries. First-party models use human-readable ids (`claude-4-8-opus-high`, `gpt-5-5-medium`). Custom, BYO, and some third-party provider models often appear as bare UUIDs (e.g. `05446706-2ea8-4578-b523-5c1728503c84`).
+`oz model list --output-format json` currently returns **only** `{ "id": "..." }` entries. Custom/BYO/omniroute models often appear as bare UUIDs.
 
-oz-acp has no second source for display names: the CLI does not expose `display_name` / `alias` / provider metadata (even though Warp’s internal model objects appear to carry those fields). Until `oz model list` (or another documented Oz API) returns labels, ACP hosts will show those UUID ids as-is. Workarounds in oz-acp (local label maps, truncated “Custom model (… )” fallbacks, hiding UUID entries) are possible later but are not real name resolution.
+oz-acp supports a **user-configurable label map**:
 
-**Upstream ask:** extend `oz model list` JSON with optional human-readable fields, for example:
+```text
+$XDG_CONFIG_HOME/oz-acp/model_labels.json   # default ~/.config/oz-acp/model_labels.json
+```
 
 ```json
 {
-  "id": "05446706-2ea8-4578-b523-5c1728503c84",
-  "name": "my-openrouter-model",
-  "display_name": "OpenRouter · My Model",
-  "provider": "open_router"
+  "labels": {
+    "c770946e-4fa3-481e-9768-dd10d5e01fde": "omniroute · gpt-5.5",
+    "05446706-2ea8-4578-b523-5c1728503c84": "openrouter/anthropic/claude-sonnet-4"
+  },
+  "notes": "optional",
+  "updatedAt": "2026-07-31T00:00:00.000Z",
+  "source": "manual"
 }
 ```
+
+Unlabeled UUIDs fall back to `Custom <first8>` in the ACP model picker. Values stay the real Oz model id (selection is unchanged).
+
+**Upstream ask:** extend `oz model list` JSON with optional human-readable fields (`name`, `display_name`, `provider`) so local maps are unnecessary.
 
 Switch options from the host UI when supported, or via:
 
@@ -509,7 +518,7 @@ Project layout:
 | Auth / whoami warnings | `oz login` or `WARP_API_KEY` in the agent `env` / Devin `devin.acp.agentEnv.*` (host Claude/Codex/Cursor/Devin login is unrelated) |
 | Devin Desktop missing Oz | Add registry entry under `~/.windsurf/acp/registry.json`, enable in **Agents**, restart or **Reload ACP Connections** |
 | Empty model list | Network/auth; cache falls back to `auto` |
-| Model picker shows bare UUIDs | Custom/BYO/third-party models: `oz model list` only returns `id` today (no display names). See [Known gap: custom / BYO model labels](#known-gap-custom--byo-model-labels) |
+| Model picker shows bare UUIDs | Add labels in `~/.config/oz-acp/model_labels.json`. See [Custom / BYO model labels](#custom--byo-model-labels-uuid-ids) |
 | Prompt succeeds in Oz but ACP UI never shows the reply | Fixed in ≥0.1.2: `oz agent run` returns NDJSON events; older oz-acp tried to parse one JSON object and never streamed `session/update`. Update the adapter. |
 | Host shows no agent output | Ensure stdout is reserved for JSON-RPC (logs are on stderr only); confirm `session/update` notifications are accepted by the host |
 | Host cannot start agent | Node 20+; use `npx -y https://github.com/tariqwest/oz-acp` if `oz-acp` is not on the host `PATH` |

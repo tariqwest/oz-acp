@@ -42,6 +42,7 @@ pnpm release <ver>         # GitHub release; add --npm to publish
 |---|---|
 | `$XDG_CONFIG_HOME/oz-acp/sessions.json` (default `~/.config/oz-acp/sessions.json`) | session → conversation/run/model bindings |
 | `$XDG_CONFIG_HOME/oz-acp/models_cache.json` (default `~/.config/oz-acp/models_cache.json`) | cached `oz model list` ids |
+| `$XDG_CONFIG_HOME/oz-acp/model_labels.json` (default `~/.config/oz-acp/model_labels.json`) | optional id → display label map for UUID/custom models |
 
 ## Oz CLI surface used
 
@@ -57,7 +58,7 @@ pnpm release <ver>         # GitHub release; add --npm to publish
 - ACP protocol version 1 (Zed-compatible): `session/prompt` returns `stopReason`.
 - `oz agent run` stdout is NDJSON: `run_started` → `conversation_started` → `{type:"agent",text}` (and possibly more). Do not `JSON.parse` the full stdout as one object.
 - Model pickers expose one base name per family (`claude-4-8-opus`); effort is a separate config option that maps back to Oz ids like `claude-4-8-opus-high`.
-- **Upstream gap:** `oz model list` JSON is id-only (`[{ "id": "..." }]`). Custom/BYO/third-party models often use UUID ids with no `name` / `display_name` / provider fields, so ACP hosts show raw UUIDs. oz-acp cannot resolve real labels until the CLI (or another documented Oz API) returns them. Preferred shape: optional `name`, `display_name`, `provider` alongside `id`.
+- **Upstream gap:** `oz model list` JSON is id-only (`[{ "id": "..." }]`). Custom/BYO/third-party models often use UUID ids. oz-acp reads optional labels from `model_labels.json` (manual). Preferred upstream shape: optional `name`, `display_name`, `provider` alongside `id`.
 - `oz run message watch` is agent-inbox messaging, not used for transcript streaming.
 - Cancellation aborts in-flight CLI children via `AbortSignal`; remote run cancel API is out of MVP.
 - Keep stderr logging only — stdout is the ACP transport.

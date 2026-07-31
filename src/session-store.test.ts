@@ -17,6 +17,7 @@ async function tempPaths() {
     stateFile: path.join(stateDir, "sessions.json"),
     lockFile: path.join(stateDir, "sessions.lock"),
     modelsCacheFile: path.join(stateDir, "models_cache.json"),
+    modelLabelsFile: path.join(stateDir, "model_labels.json"),
   };
 }
 
@@ -32,6 +33,10 @@ describe("defaultStorePaths", () => {
     assert.equal(
       paths.modelsCacheFile,
       path.join("/custom/config", "oz-acp", "models_cache.json"),
+    );
+    assert.equal(
+      paths.modelLabelsFile,
+      path.join("/custom/config", "oz-acp", "model_labels.json"),
     );
   });
 

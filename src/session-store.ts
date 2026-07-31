@@ -14,6 +14,8 @@ export type SessionStorePaths = {
   stateFile: string;
   lockFile: string;
   modelsCacheFile: string;
+  /** User-editable Oz model id → display label map. */
+  modelLabelsFile: string;
 };
 
 export function defaultStorePaths(
@@ -29,6 +31,7 @@ export function defaultStorePaths(
     stateFile: path.join(stateDir, "sessions.json"),
     lockFile: path.join(stateDir, "sessions.lock"),
     modelsCacheFile: path.join(stateDir, "models_cache.json"),
+    modelLabelsFile: path.join(stateDir, "model_labels.json"),
   };
 }
 
@@ -175,6 +178,25 @@ export class SessionStore {
     const tmp = `${this.paths.modelsCacheFile}.${process.pid}.tmp`;
     await fsp.writeFile(tmp, JSON.stringify(models, null, 2), "utf8");
     await fsp.rename(tmp, this.paths.modelsCacheFile);
+  }
+
+  async loadModelLabels(): Promise<Record<string, string>> {
+    const { loadModelLabelsFile } = await import("./model-labels.ts");
+    const file = await loadModelLabelsFile(this.paths.modelLabelsFile);
+    return file.labels;
+  }
+
+  async saveModelLabels(
+    labels: Record<string, string>,
+    meta: { notes?: string; source?: string } = {},
+  ): Promise<void> {
+    const { saveModelLabelsFile } = await import("./model-labels.ts");
+    await saveModelLabelsFile(this.paths.modelLabelsFile, {
+      labels,
+      notes: meta.notes,
+      source: meta.source,
+      updatedAt: new Date().toISOString(),
+    });
   }
 }
 

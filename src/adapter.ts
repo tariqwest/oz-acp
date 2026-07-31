@@ -11,6 +11,7 @@ import {
   type AgentProfile,
   type EffortLevel,
 } from "./config-options.ts";
+import { displayNameForModel } from "./model-labels.ts";
 import {
   decideStopReason,
   flattenPromptText,
@@ -52,6 +53,9 @@ export class OzAcpAgent {
   private modelsLoaded = false;
   private availableProfiles: AgentProfile[] = [];
   private profilesLoaded = false;
+  /** User-configured display labels keyed by Oz model id. */
+  private modelLabels: Record<string, string> = {};
+  private modelLabelsLoaded = false;
 
   constructor(opts: { store?: SessionStore; defaultCwd?: string } = {}) {
     this.store = opts.store ?? new SessionStore();
@@ -63,6 +67,7 @@ export class OzAcpAgent {
   }
 
   async initModels(): Promise<void> {
+    await this.ensureModelLabels();
     try {
       const models = await ozModelList();
       this.availableModels = models.map((m) => m.id).filter(Boolean);
@@ -85,6 +90,29 @@ export class OzAcpAgent {
     this.availableModels = ["auto"];
     this.modelsLoaded = true;
     console.error("[oz-acp] no models available; falling back to auto");
+  }
+
+  private async ensureModelLabels(): Promise<Record<string, string>> {
+    if (this.modelLabelsLoaded) return this.modelLabels;
+    try {
+      this.modelLabels = await this.store.loadModelLabels();
+      const n = Object.keys(this.modelLabels).length;
+      if (n) {
+        console.error(`[oz-acp] loaded ${n} model label(s) from ${this.store.paths.modelLabelsFile}`);
+      }
+    } catch (err) {
+      this.modelLabels = {};
+      console.error(
+        "[oz-acp] WARN: model labels load failed:",
+        (err as Error).message,
+      );
+    }
+    this.modelLabelsLoaded = true;
+    return this.modelLabels;
+  }
+
+  private modelDisplayName(modelId: string): string {
+    return displayNameForModel(modelId, this.modelLabels);
   }
 
   async initProfiles(): Promise<void> {
@@ -117,7 +145,11 @@ export class OzAcpAgent {
   }
 
   private async ensureSessionMeta(): Promise<void> {
-    await Promise.all([this.ensureModels(), this.ensureProfiles()]);
+    await Promise.all([
+      this.ensureModelLabels(),
+      this.ensureModels(),
+      this.ensureProfiles(),
+    ]);
   }
 
   private resolvedModelId(session: Session): string | null {
@@ -141,8 +173,12 @@ export class OzAcpAgent {
       : [currentBase, ...bases];
     return {
       // Host model pickers show base names only; effort is a separate config.
+      // `name` may be a user-configured label (esp. for UUID custom models).
       currentModelId: currentBase,
-      availableModels: available.map((base) => ({ modelId: base, name: base })),
+      availableModels: available.map((base) => ({
+        modelId: base,
+        name: this.modelDisplayName(base),
+      })),
     };
   }
 
@@ -150,6 +186,8 @@ export class OzAcpAgent {
     return buildSessionConfigOptions({
       availableModels: this.availableModels,
       profiles: this.availableProfiles,
+      modelLabels: this.modelLabels,
+      modelDisplayName: (id) => this.modelDisplayName(id),
       state: {
         modelId: this.resolvedModelId(session) ?? session.modelId,
         effort: session.effort,
