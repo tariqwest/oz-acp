@@ -17,10 +17,34 @@ export type RunState = z.infer<typeof RunStateSchema>;
 export const RunAgentResponseSchema = z.object({
   run_id: z.string(),
   task_id: z.string().optional(),
-  state: RunStateSchema.or(z.string()),
+  state: RunStateSchema.or(z.string()).optional(),
+  conversation_id: z.string().nullable().optional(),
   at_capacity: z.boolean().optional(),
 });
 export type RunAgentResponse = z.infer<typeof RunAgentResponseSchema>;
+
+/** One NDJSON event from `oz agent run --output-format json|ndjson`. */
+export type AgentRunStreamEvent =
+  | {
+      kind: "run_started";
+      runId: string;
+      runUrl?: string;
+      raw: Record<string, unknown>;
+    }
+  | {
+      kind: "conversation_started";
+      conversationId: string;
+      raw: Record<string, unknown>;
+    }
+  | {
+      kind: "agent_text";
+      text: string;
+      raw: Record<string, unknown>;
+    }
+  | {
+      kind: "other";
+      raw: Record<string, unknown>;
+    };
 
 export const RunItemSchema = z
   .object({

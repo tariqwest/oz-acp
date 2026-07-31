@@ -24,6 +24,7 @@ import {
   ozWhoami,
   OzCliError,
 } from "./oz.ts";
+import type { AgentRunStreamEvent } from "./types.ts";
 import { SessionStore, sessionFromStored } from "./session-store.ts";
 import { pollRunTurn } from "./stream.ts";
 import type { Session } from "./types.ts";
@@ -474,6 +475,39 @@ export class OzAcpAgent {
     };
 
     try {
+      let streamedText = false;
+      let streamMessageId: string | null = null;
+      let chunkIndex = 0;
+
+      const onEvent = async (event: AgentRunStreamEvent) => {
+        if (event.kind === "run_started") {
+          session.lastRunId = event.runId;
+          return;
+        }
+        if (event.kind === "conversation_started") {
+          session.conversationId = event.conversationId;
+          return;
+        }
+        if (event.kind === "agent_text") {
+          const text = event.text;
+          if (!text) return;
+          // One messageId for the whole streamed assistant turn so hosts can
+          // concatenate chunks instead of treating each as a separate message.
+          if (!streamMessageId) {
+            streamMessageId = `oz-stream-${session.lastRunId || sessionId}`;
+          }
+          const key = `stream:${streamMessageId}:${chunkIndex++}`;
+          if (session.seenKeys.has(key)) return;
+          session.seenKeys.add(key);
+          streamedText = true;
+          await emit({
+            sessionUpdate: "agent_message_chunk",
+            messageId: streamMessageId,
+            content: { type: "text", text },
+          });
+        }
+      };
+
       let started;
       try {
         started = await ozAgentRun({
@@ -484,6 +518,7 @@ export class OzAcpAgent {
           profileId: session.profileId,
           computerUse: session.computerUse,
           signal: abort.signal,
+          onEvent,
         });
       } catch (err) {
         if (abort.signal.aborted) {
@@ -497,21 +532,67 @@ export class OzAcpAgent {
       }
 
       session.lastRunId = started.run_id;
+      if (started.conversation_id) {
+        session.conversationId = started.conversation_id;
+      }
       await this.persist(sessionId, session);
 
-      const result = await pollRunTurn({
-        session,
-        runId: started.run_id,
-        emit,
-        signal: abort.signal,
-      });
+      // Live NDJSON already carried assistant text for simple turns. Still poll
+      // once the child exits so tool calls / late conversation blocks show up.
+      // Seed seenKeys from the conversation first so poll does not re-emit the
+      // same assistant text that was already streamed.
+      if (streamedText && session.conversationId && !abort.signal.aborted) {
+        try {
+          const conversation = await ozConversationGet(session.conversationId, {
+            signal: abort.signal,
+          });
+          const already = mapConversationDelta(conversation, new Set());
+          for (const delta of already) session.seenKeys.add(delta.key);
+        } catch (err) {
+          console.error(
+            "[oz-acp] WARN: failed to seed seenKeys after stream:",
+            (err as Error).message,
+          );
+        }
+      }
+
+      let pollHadUpdates = false;
+      let runState: string | null = started.state ?? null;
+      if (!abort.signal.aborted) {
+        try {
+          const result = await pollRunTurn({
+            session,
+            runId: started.run_id,
+            emit,
+            signal: abort.signal,
+            // Stream path already waited for the run process; a short drain is enough.
+            drainPasses: streamedText ? 1 : 3,
+            intervalMs: streamedText ? 250 : 500,
+          });
+          pollHadUpdates = result.hadUpdates;
+          runState = result.runState ?? runState;
+          if (result.conversationId) session.conversationId = result.conversationId;
+        } catch (err) {
+          if (!abort.signal.aborted) {
+            console.error(
+              "[oz-acp] WARN: post-run poll failed:",
+              (err as Error).message,
+            );
+          }
+        }
+      }
+
+      // If the stream had text but poll never saw a terminal state, succeed.
+      if (!runState && (streamedText || started.agentText)) {
+        runState = "SUCCEEDED";
+      }
 
       await this.persist(sessionId, session);
 
       const decision = decideStopReason({
         cancelled: abort.signal.aborted,
-        runState: result.runState,
-        hadUpdates: result.hadUpdates,
+        runState,
+        hadUpdates: streamedText || pollHadUpdates || Boolean(started.agentText),
       });
 
       if (decision.error) {

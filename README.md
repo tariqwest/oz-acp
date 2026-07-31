@@ -447,10 +447,12 @@ Model IDs are cached at `$XDG_CONFIG_HOME/oz-acp/models_cache.json` (default `~/
 ## How a prompt turn works
 
 1. Flatten ACP text prompt blocks
-2. `oz agent run --output-format json -p ... --cwd ... [--model] [--conversation]`
-3. Poll `oz run get <run_id>` + conversation JSON every ~500ms
-4. Map new `text` / `action` / `action_result` blocks to `session/update`
+2. `oz agent run --output-format ndjson -p ... --cwd ... [--model] [--conversation]`
+3. Stream NDJSON events live (`run_started`, `conversation_started`, `{type:"agent",text}`) into ACP `session/update` (`agent_message_chunk`)
+4. After the child exits, briefly poll `oz run get` / conversation JSON for tool calls and any late blocks (without re-emitting already-streamed text)
 5. Complete `session/prompt` with `{ stopReason: "end_turn" | "cancelled" }`
+
+Note: Oz emits **NDJSON** for `agent run` even with `--output-format json` (multiple lines, not one object). oz-acp parses that stream; older adapters that `JSON.parse` the whole stdout will hang/error after a successful Oz run.
 
 ## Development
 
@@ -508,7 +510,8 @@ Project layout:
 | Devin Desktop missing Oz | Add registry entry under `~/.windsurf/acp/registry.json`, enable in **Agents**, restart or **Reload ACP Connections** |
 | Empty model list | Network/auth; cache falls back to `auto` |
 | Model picker shows bare UUIDs | Custom/BYO/third-party models: `oz model list` only returns `id` today (no display names). See [Known gap: custom / BYO model labels](#known-gap-custom--byo-model-labels) |
-| Host shows no agent output | Ensure stdout is reserved for JSON-RPC (logs are on stderr only) |
+| Prompt succeeds in Oz but ACP UI never shows the reply | Fixed in ≥0.1.2: `oz agent run` returns NDJSON events; older oz-acp tried to parse one JSON object and never streamed `session/update`. Update the adapter. |
+| Host shows no agent output | Ensure stdout is reserved for JSON-RPC (logs are on stderr only); confirm `session/update` notifications are accepted by the host |
 | Host cannot start agent | Node 20+; use `npx -y https://github.com/tariqwest/oz-acp` if `oz-acp` is not on the host `PATH` |
 | Agent missing in VS Code | Install an ACP client extension; use the settings key it documents (`agent_servers`, `acp.agents`, or `multicoder.agentServers`) |
 | No model/effort UI | Host must render ACP `configOptions`; otherwise call `session/set_config_option` |

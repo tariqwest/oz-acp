@@ -47,7 +47,7 @@ pnpm release <ver>         # GitHub release; add --npm to publish
 
 - `oz whoami --output-format json`
 - `oz model list --output-format json`
-- `oz agent run --prompt ... --cwd ... [--model] [--conversation] --output-format json`
+- `oz agent run --prompt ... --cwd ... [--model] [--conversation] --output-format ndjson` (NDJSON event stream even if `json` is requested)
 - `oz run get <run_id> --output-format json`
 - `oz run conversation get <id> --output-format json`
 - `oz run get <run_id> --conversation --output-format json`
@@ -55,6 +55,7 @@ pnpm release <ver>         # GitHub release; add --npm to publish
 ## Notes
 
 - ACP protocol version 1 (Zed-compatible): `session/prompt` returns `stopReason`.
+- `oz agent run` stdout is NDJSON: `run_started` → `conversation_started` → `{type:"agent",text}` (and possibly more). Do not `JSON.parse` the full stdout as one object.
 - Model pickers expose one base name per family (`claude-4-8-opus`); effort is a separate config option that maps back to Oz ids like `claude-4-8-opus-high`.
 - **Upstream gap:** `oz model list` JSON is id-only (`[{ "id": "..." }]`). Custom/BYO/third-party models often use UUID ids with no `name` / `display_name` / provider fields, so ACP hosts show raw UUIDs. oz-acp cannot resolve real labels until the CLI (or another documented Oz API) returns them. Preferred shape: optional `name`, `display_name`, `provider` alongside `id`.
 - `oz run message watch` is agent-inbox messaging, not used for transcript streaming.

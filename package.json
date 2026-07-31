@@ -22,7 +22,7 @@
     "start": "tsx src/index.ts",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/map.test.ts src/session-store.test.ts src/config-options.test.ts",
+    "test": "tsx --test src/map.test.ts src/session-store.test.ts src/config-options.test.ts src/oz.test.ts",
     "oz-acp": "tsx src/index.ts",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",

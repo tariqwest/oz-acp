@@ -6,9 +6,9 @@ import { split as splitShellWords } from "./shell-words.ts";
 import {
   ConversationResponseSchema,
   ModelListSchema,
-  RunAgentResponseSchema,
   RunItemSchema,
   WhoamiSchema,
+  type AgentRunStreamEvent,
   type ConversationResponse,
   type ModelList,
   type RunAgentResponse,
@@ -235,10 +235,106 @@ export type AgentRunInput = {
   /** When non-null, written into a temp agent config file as computer_use_enabled. */
   computerUse?: boolean | null;
   signal?: AbortSignal;
+  /** Called for each NDJSON event as it arrives (line-buffered). */
+  onEvent?: (event: AgentRunStreamEvent) => void | Promise<void>;
 };
 
-export async function ozAgentRun(input: AgentRunInput): Promise<RunAgentResponse> {
-  const args = ["agent", "run", "--prompt", input.prompt, "--cwd", input.cwd];
+export type AgentRunResult = RunAgentResponse & {
+  conversation_id: string | null;
+  agentText: string;
+  events: AgentRunStreamEvent[];
+};
+
+/**
+ * Parse one stdout line from `oz agent run --output-format json|ndjson`.
+ * Oz emits NDJSON events even when `--output-format json` is set.
+ */
+export function parseAgentRunNdjsonLine(line: string): AgentRunStreamEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const type = typeof raw.type === "string" ? raw.type : "";
+  const eventType = typeof raw.event_type === "string" ? raw.event_type : "";
+
+  if (type === "system" && eventType === "run_started" && typeof raw.run_id === "string") {
+    return {
+      kind: "run_started",
+      runId: raw.run_id,
+      runUrl: typeof raw.run_url === "string" ? raw.run_url : undefined,
+      raw,
+    };
+  }
+
+  if (
+    type === "system" &&
+    eventType === "conversation_started" &&
+    typeof raw.conversation_id === "string"
+  ) {
+    return {
+      kind: "conversation_started",
+      conversationId: raw.conversation_id,
+      raw,
+    };
+  }
+
+  // Live agent tokens / final assistant text chunks.
+  if (type === "agent" && typeof raw.text === "string") {
+    return { kind: "agent_text", text: raw.text, raw };
+  }
+
+  // Some builds may emit assistant text without type=agent.
+  if (typeof raw.text === "string" && (type === "assistant" || type === "message")) {
+    return { kind: "agent_text", text: raw.text, raw };
+  }
+
+  return { kind: "other", raw };
+}
+
+export function summarizeAgentRunEvents(events: AgentRunStreamEvent[]): {
+  runId: string | null;
+  conversationId: string | null;
+  agentText: string;
+} {
+  let runId: string | null = null;
+  let conversationId: string | null = null;
+  let agentText = "";
+  for (const event of events) {
+    if (event.kind === "run_started") runId = event.runId;
+    else if (event.kind === "conversation_started") {
+      conversationId = event.conversationId;
+    } else if (event.kind === "agent_text") {
+      agentText += event.text;
+    }
+  }
+  return { runId, conversationId, agentText };
+}
+
+/**
+ * Run `oz agent run` and consume its NDJSON event stream.
+ *
+ * Important: even with `--output-format json`, Oz prints multiple NDJSON lines
+ * (`run_started`, `conversation_started`, `agent` text, …), not one object.
+ */
+export async function ozAgentRun(input: AgentRunInput): Promise<AgentRunResult> {
+  const args = [
+    "agent",
+    "run",
+    "--prompt",
+    input.prompt,
+    "--cwd",
+    input.cwd,
+    // ndjson is the natural shape; json currently emits the same multi-line stream.
+    "--output-format",
+    "ndjson",
+  ];
   if (input.modelId) {
     args.push("--model", input.modelId);
   }
@@ -263,13 +359,130 @@ export async function ozAgentRun(input: AgentRunInput): Promise<RunAgentResponse
     args.push("--file", tempConfigPath);
   }
 
+  const bin = resolveOzBin();
+  const fullArgs = [...extraArgs(), ...args];
+  const events: AgentRunStreamEvent[] = [];
+  let stdout = "";
+  let stderr = "";
+
   try {
-    return await runOzJson(args, (v) => RunAgentResponseSchema.parse(v), {
-      cwd: input.cwd,
-      signal: input.signal,
-      // Starting a run can take a bit while snapshotting; keep generous.
-      timeoutMs: 120_000,
+    const result = await new Promise<OzExecResult>((resolve, reject) => {
+      const child = spawn(bin, fullArgs, {
+        cwd: input.cwd,
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      let settled = false;
+      let lineBuf = "";
+      const pending: Promise<void>[] = [];
+
+      const handleLine = (line: string) => {
+        const event = parseAgentRunNdjsonLine(line);
+        if (!event) return;
+        events.push(event);
+        if (input.onEvent) {
+          pending.push(
+            Promise.resolve(input.onEvent(event)).catch((err) => {
+              console.error(
+                "[oz-acp] WARN: onEvent handler failed:",
+                (err as Error).message,
+              );
+            }),
+          );
+        }
+      };
+
+      const onAbort = () => {
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (!settled) child.kill("SIGKILL");
+        }, 1500).unref();
+      };
+
+      if (input.signal) {
+        if (input.signal.aborted) onAbort();
+        else input.signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      // Agent turns can be long; no hard timeout by default (host cancel uses signal).
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+        lineBuf += chunk;
+        let idx: number;
+        while ((idx = lineBuf.indexOf("\n")) >= 0) {
+          const line = lineBuf.slice(0, idx);
+          lineBuf = lineBuf.slice(idx + 1);
+          handleLine(line);
+        }
+      });
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+
+      child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        input.signal?.removeEventListener("abort", onAbort);
+        reject(
+          new OzCliError(`failed to spawn oz (${bin}): ${err.message}`, {
+            stderr,
+            stdout,
+          }),
+        );
+      });
+
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        input.signal?.removeEventListener("abort", onAbort);
+        if (lineBuf.trim()) handleLine(lineBuf);
+        void Promise.all(pending).finally(() => {
+          resolve({
+            stdout,
+            stderr,
+            exitCode: code ?? 0,
+          });
+        });
+      });
     });
+
+    const summary = summarizeAgentRunEvents(events);
+
+    if (result.exitCode !== 0) {
+      const detail = (result.stderr || result.stdout).trim();
+      // If the stream already produced a run id + agent text, treat as soft failure
+      // only when there is truly no useful result.
+      if (!summary.runId && !summary.agentText) {
+        throw new OzCliError(
+          detail
+            ? `oz agent run failed: ${detail}`
+            : `oz agent run exited with code ${result.exitCode}`,
+          result,
+        );
+      }
+      console.error(
+        `[oz-acp] WARN: oz agent run exit ${result.exitCode} after partial stream:`,
+        detail.slice(0, 400),
+      );
+    }
+
+    if (!summary.runId) {
+      throw new OzCliError(
+        "oz agent run produced no run_started event",
+        result,
+      );
+    }
+
+    return {
+      run_id: summary.runId,
+      conversation_id: summary.conversationId,
+      agentText: summary.agentText,
+      events,
+      state: summary.agentText || result.exitCode === 0 ? "SUCCEEDED" : "FAILED",
+    };
   } finally {
     if (tempConfigPath) {
       await fsp.unlink(tempConfigPath).catch(() => undefined);
