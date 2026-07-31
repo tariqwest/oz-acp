@@ -56,6 +56,7 @@ pnpm release <ver>         # GitHub release; add --npm to publish
 
 - ACP protocol version 1 (Zed-compatible): `session/prompt` returns `stopReason`.
 - Model pickers expose one base name per family (`claude-4-8-opus`); effort is a separate config option that maps back to Oz ids like `claude-4-8-opus-high`.
+- **Upstream gap:** `oz model list` JSON is id-only (`[{ "id": "..." }]`). Custom/BYO/third-party models often use UUID ids with no `name` / `display_name` / provider fields, so ACP hosts show raw UUIDs. oz-acp cannot resolve real labels until the CLI (or another documented Oz API) returns them. Preferred shape: optional `name`, `display_name`, `provider` alongside `id`.
 - `oz run message watch` is agent-inbox messaging, not used for transcript streaming.
 - Cancellation aborts in-flight CLI children via `AbortSignal`; remote run cancel API is out of MVP.
 - Keep stderr logging only — stdout is the ACP transport.
