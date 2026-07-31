@@ -1,6 +1,6 @@
 {
   "name": "oz-acp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ACP stdio adapter for Warp Oz CLI",
   "type": "module",
   "license": "MIT",
