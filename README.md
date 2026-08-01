@@ -11,16 +11,17 @@ ACP host (Zed / VS Code / …)
 
 ## Prerequisites
 
-- **Node.js 20+**
-- **pnpm** (recommended) or npm/npx
+- **Bun 1.1+** and/or **Node.js 20+**
+  - **Bun:** preferred for development; also supported when running the package under Bun (`bunx`, `bun run`)
+  - **Node + tsx:** default package bin path for `npx` / global npm / many ACP hosts
 - **`oz`** on your `PATH` (Warp CLI / Homebrew)
 - Auth via `oz login` **or** `WARP_API_KEY`
 
 Check tools:
 
 ```bash
-node -v
-pnpm -v   # or: npm -v
+bun -v    # optional but recommended (>= 1.1)
+node -v   # >= 20 when using npx / Node hosts
 oz --version
 oz whoami --output-format json
 ```
@@ -37,7 +38,12 @@ npx -y https://github.com/tariqwest/oz-acp
 
 # after the package is on npm
 npx -y oz-acp
+
+# Homebrew
+brew tap tariqwest/tap && brew install oz-acp && oz-acp
 ```
+
+These install/run paths use the package bin (`bin/oz-acp.mjs`): under **Node** it loads TypeScript via **tsx** (for `npx` compatibility); under **Bun** it imports `src/index.ts` directly.
 
 ### Install the CLI
 
@@ -46,23 +52,48 @@ npx -y oz-acp
 npm install -g https://github.com/tariqwest/oz-acp
 # after npm publish
 npm install -g oz-acp
+# Homebrew tap
+brew tap tariqwest/tap && brew install oz-acp
 
-oz-acp   # on PATH
+oz-acp   # on PATH (Node+tsx or Bun, depending on how the bin is invoked)
 ```
+
+### Contributor setup (Bun)
+
+```bash
+git clone https://github.com/tariqwest/oz-acp.git
+cd oz-acp
+bun install
+chmod +x bin/oz-acp.mjs
+bun test
+bun run typecheck
+```
+
+Day-to-day development uses **Bun** only — see [Development](#development).
 
 ### Smoke-check (stdio JSON-RPC)
 
 ```bash
+# installed / npx (Node + tsx)
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}' \
   | npx -y https://github.com/tariqwest/oz-acp
-# or: oz-acp
+
+# local Bun dev entry
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}' \
+  | bun src/index.ts
 ```
 
 You should see a JSON-RPC result with `"agentInfo":{"name":"oz",...}` on stdout. Diagnostic logs go to stderr only.
 
-### No compile step
+### Runtime split (no compile step)
 
-TypeScript runs in-place via **tsx** (a runtime dependency), so `npx` / global installs work with no `tsc` emit. `pnpm typecheck` is optional for contributors.
+| Mode | How TypeScript runs | Command |
+|---|---|---|
+| **Dev (Bun)** | Bun runs `.ts` directly | `bun run dev` / `bun start` / `bun test` |
+| **Released under Bun** | Bin detects Bun and imports `src/index.ts` | `bunx oz-acp` / `bun run` of the installed bin |
+| **Released under Node** | Bin spawns Node + **tsx** → `src/index.ts` | `npx oz-acp` / `node bin/oz-acp.mjs` / most ACP hosts |
+
+There is no `tsc` emit for any path. Bun remains a first-class runtime; the Node/tsx path exists so `npx` and Node-only hosts keep working. `bun run typecheck` (`tsc --noEmit`) is optional for contributors.
 
 ## Usage
 
@@ -92,10 +123,14 @@ Supported agent methods include: `initialize`, `session/new`, `session/load`, `s
 ### Run the adapter manually (debug only)
 
 ```bash
-# stdio server — host would attach here
+# installed package bin (works on Node via tsx, or Bun directly)
 oz-acp
-# or
 npx -y https://github.com/tariqwest/oz-acp
+bunx oz-acp
+
+# local clone (Bun)
+bun start
+bun run dev   # watch mode
 ```
 
 Smoke without a full host:
@@ -104,7 +139,7 @@ Smoke without a full host:
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}' \
   '{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"'"$(pwd)"'","mcpServers":[]}}' \
-  | npx -y https://github.com/tariqwest/oz-acp
+  | bun src/index.ts
 ```
 
 Expect JSON-RPC responses for `initialize` and `session/new` on stdout. Keep logs on stderr only—stdout is the ACP transport.
@@ -142,11 +177,17 @@ On `initialize` / session setup, `oz-acp` loads `oz model list` and `oz agent pr
 
 Oz does **not** support a free-form `temperature` setting in agent config / CLI, so it is not exposed.
 
-#### Custom / BYO model labels (UUID ids)
+#### Custom / BYO / third-party model labels (UUID ids)
 
-`oz model list --output-format json` currently returns **only** `{ "id": "..." }` entries. Custom/BYO/omniroute models often appear as bare UUIDs.
+**Upstream gap:** `oz model list --output-format json` currently returns **only** id fields:
 
-oz-acp supports a **user-configurable label map**:
+```json
+[{ "id": "claude-4-8-opus-high" }, { "id": "c770946e-4fa3-481e-9768-dd10d5e01fde" }]
+```
+
+First-party Oz catalog ids are already human-readable. **Custom, BYO, and many third-party / gateway-backed models** are registered under **opaque UUID ids**, with no `name`, `display_name`, or `provider` in the list payload. ACP hosts therefore cannot show a useful picker label from the CLI alone.
+
+Until upstream adds optional label fields on `oz model list`, oz-acp addresses this with a **local, user-owned id → label map**. Selection still uses the real Oz model id; only the **display name** in the ACP model picker changes.
 
 ```text
 $XDG_CONFIG_HOME/oz-acp/model_labels.json   # default ~/.config/oz-acp/model_labels.json
@@ -155,7 +196,7 @@ $XDG_CONFIG_HOME/oz-acp/model_labels.json   # default ~/.config/oz-acp/model_lab
 ```json
 {
   "labels": {
-    "c770946e-4fa3-481e-9768-dd10d5e01fde": "omniroute · gpt-5.5",
+    "c770946e-4fa3-481e-9768-dd10d5e01fde": "gateway/combo-or-model-slug",
     "05446706-2ea8-4578-b523-5c1728503c84": "openrouter/anthropic/claude-sonnet-4"
   },
   "notes": "optional",
@@ -164,9 +205,76 @@ $XDG_CONFIG_HOME/oz-acp/model_labels.json   # default ~/.config/oz-acp/model_lab
 }
 ```
 
-Unlabeled UUIDs fall back to `Custom <first8>` in the ACP model picker. Values stay the real Oz model id (selection is unchanged).
+Unlabeled UUID ids fall back to `Custom <first8>` (e.g. `Custom c770946e`). Flat maps (`{ "<uuid>": "label" }` without a nested `labels` object) are also accepted. Labels load when the adapter builds config options; restart the ACP session (or the host agent process) after editing the file.
 
-**Upstream ask:** extend `oz model list` JSON with optional human-readable fields (`name`, `display_name`, `provider`) so local maps are unnecessary.
+**Preferred upstream shape** (so this file becomes unnecessary):
+
+```json
+[
+  {
+    "id": "c770946e-4fa3-481e-9768-dd10d5e01fde",
+    "name": "combo-or-model-slug",
+    "display_name": "Friendly name",
+    "provider": "my-gateway"
+  }
+]
+```
+
+##### Populating labels manually
+
+1. List ids: `oz model list --output-format json`
+2. Create or edit `~/.config/oz-acp/model_labels.json` with the UUID → label pairs you care about
+3. Re-open / re-init the ACP session so oz-acp reloads the map
+
+Any short string works as a label (`provider/model`, a combo name, a nickname). Prefer stable slugs you recognize in your own gateway or provider console.
+
+##### Inferring labels with a probe script (example only)
+
+When you have many UUID models and do not want to label them by hand, you can **probe** each id with a short `oz agent run` and infer a name from the reply and/or error text. That is a lightweight stand-in for what an ACP host does on `session/prompt`—it is **not** wired into the oz-acp adapter itself.
+
+An abstracted example lives in the repo (copy or run from a clone):
+
+```bash
+# plan only — list UUID models that would be probed
+node scripts/examples/probe-model-labels.mjs --dry-run
+
+# probe UUID models, merge into ~/.config/oz-acp/model_labels.json
+node scripts/examples/probe-model-labels.mjs --keep-going
+
+# limit scope while iterating
+node scripts/examples/probe-model-labels.mjs --models '<uuid1>,<uuid2>' --replace
+```
+
+**How the example works**
+
+1. Read model ids from `oz model list` (default: UUID-shaped ids only).
+2. For each id, run `oz agent run --model <id> --output-format ndjson` with a unique marker prompt that asks for a one-line model slug.
+3. Parse NDJSON agent text plus stderr/stdout for candidates:
+   - bracketed paths in errors (`[provider/model-or-combo]`)
+   - `model` / `resolved_model` / `combo_name`-style fragments
+   - short self-identify lines from a cooperative model
+4. Rank candidates (prefer `provider/...` slugs; demote HTML noise and raw UUIDs).
+5. Write / merge `model_labels.json` and a side report `model_labels_probe_report.json` next to it.
+
+This is **opt-in tooling**, environment-agnostic, and easy to fork. It does **not** ship as part of the published package runtime surface and is **not** invoked by `oz-acp` automatically.
+
+**Adapting the example for common custom / 3p setups**
+
+| Setup | What to change |
+|---|---|
+| **OpenAI-compatible gateway** (LiteLLM, Helicone, custom reverse proxy) | Keep the probe loop; tighten `extractLabelCandidates` to your error JSON (`error.metadata.model`, `x-litellm-model`, response headers you log server-side). |
+| **OpenRouter / Together / Fireworks / Groq style routers** | Prefer labels like `openrouter/org/model`. Error bodies often already contain that path in brackets or `model` fields—extend the regexes rather than the Oz spawn logic. |
+| **Self-hosted router with request logs** (SQLite, JSONL, ClickHouse, …) | After each probe, query *your* log store in the time window of the run (and/or match the unique marker string in the logged prompt). Prefer the router's **combo / route name** over the leaf upstream model when both exist. Do not hard-code hostnames; pass log location via flags/env. |
+| **Provider console export** | If the gateway can dump `uuid → display name` (CSV/JSON), skip probing and generate `model_labels.json` with a 10-line transform script. |
+| **Models that refuse to self-identify** | Rely on error-path extraction, log correlation, or manual labels. Use `--keep-going` and fill gaps by hand. |
+| **Failed runs that still name the backend** | Treat stderr as a signal: many gateways include `[route/model] [502]: …` even when the Oz run fails—those strings are often the best available label. |
+
+**Caveats**
+
+- Probing spends provider credits / rate limit and creates real Oz runs.
+- Inferred labels can be wrong when several backends share an error shape; always spot-check `model_labels_probe_report.json`.
+- oz-acp only **reads** the labels file—it never runs the probe script.
+- When upstream ships `name` / `display_name` / `provider` on `oz model list`, prefer those and delete or ignore the local map.
 
 Switch options from the host UI when supported, or via:
 
@@ -191,9 +299,10 @@ Use one of these (no local clone required):
 
 | Situation | `command` | `args` |
 |---|---|---|
-| Installed globally (`npm i -g …` / on `PATH`) | `oz-acp` | `[]` |
+| Installed globally (`npm i -g …` / Homebrew / on `PATH`) | `oz-acp` | `[]` |
 | Not installed yet (GitHub) | `npx` | `["-y", "https://github.com/tariqwest/oz-acp"]` |
 | Published on npm | `npx` | `["-y", "oz-acp"]` |
+| Homebrew | `oz-acp` | `[]` |
 
 GUI hosts often have a thin `PATH`; if `oz-acp` is not found, prefer the `npx` form.
 
@@ -465,11 +574,52 @@ Note: Oz emits **NDJSON** for `agent run` even with `--output-format json` (mult
 
 ## Development
 
+This repo is **Bun-first**. Use Bun for install, run, test, release scripts, and as a supported production runtime. The package bin also supports **Node + tsx** so `npx` and Node-only ACP hosts work without Bun.
+
+### Workflow
+
 ```bash
-pnpm install
-pnpm start          # run adapter on stdio
-pnpm test           # unit tests
-pnpm typecheck      # optional tsc --noEmit
+bun install                 # creates/updates bun.lock
+bun run dev                 # bun --watch src/index.ts
+bun start                   # bun src/index.ts (stdio ACP server)
+bun test                    # bun test src
+bun run typecheck           # tsc --noEmit (optional)
+```
+
+| Script | What it runs |
+|---|---|
+| `bun run dev` | Watch-mode ACP server on stdio |
+| `bun start` / `bun run oz-acp` | One-shot Bun server (`src/index.ts`) |
+| `bun test` | Unit tests under `src/` |
+| `bun run typecheck` | `tsc --noEmit` |
+| `bun run formula …` | Generate Homebrew formula |
+| `bun run release …` | Tag / GitHub release / optional npm + Homebrew tap |
+| `bun run start:node` | Force Node+tsx start path |
+| `bun run test:node` | Node+tsx/`node:test` unit tests |
+| `node bin/oz-acp.mjs` | Package bin under Node (tsx) |
+| `bun bin/oz-acp.mjs` | Package bin under Bun (direct `.ts` import) |
+
+### Bun vs Node+tsx
+
+- **Bun** is supported for development **and** release/runtime (`bunx oz-acp`, `bun bin/oz-acp.mjs`, or running `src/index.ts` directly).
+- **Node + tsx** is the compatibility entry for **`npx`**, global npm installs, Homebrew’s Node dependency, and hosts that only spawn Node.
+- Lockfile is `bun.lock` (`packageManager` is Bun). Do not reintroduce pnpm lockfiles.
+- **`tsx` stays a runtime dependency** so the Node path works without requiring Bun on the host.
+
+### Compatibility checks
+
+Before release, confirm both runtimes:
+
+```bash
+# Bun
+bun start
+bun test
+bun bin/oz-acp.mjs
+
+# Node + tsx (npx path)
+bun run start:node
+bun run test:node
+node bin/oz-acp.mjs
 ```
 
 ## Release
@@ -478,27 +628,27 @@ Create a GitHub release (tag + `gh release`), optionally publishing to npm and u
 
 ```bash
 # dry-run (no git/gh/npm changes)
-pnpm release 0.1.1 --dry-run
+bun run release 0.1.1 --dry-run
 
 # GitHub release only
-pnpm release 0.1.1
+bun run release 0.1.1
 
 # GitHub release + npm publish
-pnpm release 0.1.1 --npm
-# or: node scripts/release.mjs 0.1.1 --npm --yes
+bun run release 0.1.1 --npm
+# or: bun scripts/release.mjs 0.1.1 --npm --yes
 
 # GitHub release + Homebrew formula push to tariqwest/homebrew-tap
-pnpm release patch --homebrew --yes
+bun run release patch --homebrew --yes
 
 # bump from package.json (patch|minor|major) and release
-pnpm release patch --npm --homebrew --yes
+bun run release patch --npm --homebrew --yes
 ```
 
 Generate the formula alone:
 
 ```bash
-pnpm formula 0.1.3                 # print Formula/oz-acp.rb to stdout
-pnpm formula 0.1.3 -- --write /tmp/oz-acp.rb
+bun run formula 0.1.3                 # print Formula/oz-acp.rb to stdout
+bun run formula 0.1.3 -- --write /tmp/oz-acp.rb
 ```
 
 Install from the tap:
@@ -508,23 +658,26 @@ brew tap tariqwest/tap
 brew install oz-acp
 ```
 
-Requires a clean git worktree and `gh` auth. For `--npm` also run `npm login` (or `pnpm login`) first. OTP: `--otp 123456`.
+Requires a clean git worktree and `gh` auth. For `--npm` also run `npm login` first. OTP: `--otp 123456`.
 
-Package publish surface: `bin/`, non-test `src/`, `README.md`, `AGENTS.md`, `LICENSE` (see `package.json` `files` + `.npmignore`). `prepublishOnly` runs tests and typecheck.
+Package publish surface: `bin/`, non-test `src/`, `README.md`, `AGENTS.md`, `LICENSE` (see `package.json` `files` + `.npmignore`). `prepublishOnly` runs `bun test` and `bun run typecheck`.
 
-See `node scripts/release.mjs --help`.
+See `bun scripts/release.mjs --help`.
 
 Project layout:
 
 | Path | Purpose |
 |---|---|
-| `bin/oz-acp.mjs` | Node bin entry (tsx launcher) |
-| `src/index.ts` | ACP stdio server |
+| `bin/oz-acp.mjs` | Package bin: Bun → direct `.ts`; Node → tsx (npx-compatible) |
+| `src/index.ts` | ACP stdio server (Bun and Node/tsx) |
 | `src/adapter.ts` | Session lifecycle + prompt orchestration |
 | `src/oz.ts` | Oz CLI subprocess helpers |
 | `src/stream.ts` | Run/conversation polling |
 | `src/map.ts` | Oz conversation → ACP updates |
 | `src/session-store.ts` | Persistent session store |
+| `src/model-labels.ts` | Optional UUID → display label map |
+| `scripts/examples/probe-model-labels.mjs` | Example-only helper to infer labels via probe prompts (not wired into the adapter) |
+| `bun.lock` | Bun lockfile (dev) |
 | `AGENTS.md` | Notes for coding agents |
 
 ## Troubleshooting
@@ -535,10 +688,10 @@ Project layout:
 | Auth / whoami warnings | `oz login` or `WARP_API_KEY` in the agent `env` / Devin `devin.acp.agentEnv.*` (host Claude/Codex/Cursor/Devin login is unrelated) |
 | Devin Desktop missing Oz | Add registry entry under `~/.windsurf/acp/registry.json`, enable in **Agents**, restart or **Reload ACP Connections** |
 | Empty model list | Network/auth; cache falls back to `auto` |
-| Model picker shows bare UUIDs | Add labels in `~/.config/oz-acp/model_labels.json`. See [Custom / BYO model labels](#custom--byo-model-labels-uuid-ids) |
+| Model picker shows bare UUIDs / `Custom <first8>` | Custom/3p models are id-only from `oz model list` today. Add labels in `~/.config/oz-acp/model_labels.json`, or infer them with `scripts/examples/probe-model-labels.mjs`. See [Custom / BYO / third-party model labels](#custom--byo--third-party-model-labels-uuid-ids) |
 | Prompt succeeds in Oz but ACP UI never shows the reply | Fixed in ≥0.1.2: `oz agent run` returns NDJSON events; older oz-acp tried to parse one JSON object and never streamed `session/update`. Update the adapter. |
 | Host shows no agent output | Ensure stdout is reserved for JSON-RPC (logs are on stderr only); confirm `session/update` notifications are accepted by the host |
-| Host cannot start agent | Node 20+; use `npx -y https://github.com/tariqwest/oz-acp` if `oz-acp` is not on the host `PATH` |
+| Host cannot start agent | Need **Node 20+** (npx path) or **Bun 1.1+**. Try `npx -y https://github.com/tariqwest/oz-acp`, `bunx oz-acp`, or `brew install tariqwest/tap/oz-acp`. |
 | Agent missing in VS Code | Install an ACP client extension; use the settings key it documents (`agent_servers`, `acp.agents`, or `multicoder.agentServers`) |
 | No model/effort UI | Host must render ACP `configOptions`; otherwise call `session/set_config_option` |
 | Prompt hangs / no updates | Confirm `oz whoami` works and the account has credits |
