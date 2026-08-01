@@ -13,9 +13,14 @@
  *   pnpm release --npm                    # use package.json version
  *   pnpm release 0.1.1 --dry-run
  *   pnpm release patch --npm              # npm version bump style: patch|minor|major
+ *   pnpm release patch --homebrew         # also update tariqwest/homebrew-tap Formula/oz-acp.rb
+ *   pnpm release 0.1.4 --homebrew --npm
  *
  * Options:
  *   --npm              Publish to npm after creating the GitHub release
+ *   --homebrew         Generate Homebrew formula and push to the tap repo
+ *   --tap OWNER/NAME   Homebrew tap repo (default: tariqwest/homebrew-tap)
+ *   --no-homebrew      Skip Homebrew formula update (default is off unless --homebrew)
  *   --dry-run          Print actions without changing git/npm/GitHub
  *   --skip-checks      Skip pnpm test / typecheck
  *   --skip-push        Create local tag/commit but do not push
@@ -32,6 +37,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline/promises";
@@ -67,6 +73,8 @@ function parseArgs(argv) {
   const opts = {
     versionArg: null,
     npm: false,
+    homebrew: false,
+    tap: "tariqwest/homebrew-tap",
     dryRun: false,
     skipChecks: false,
     skipPush: false,
@@ -88,6 +96,23 @@ function parseArgs(argv) {
     if (a === "--help" || a === "-h") usage(0);
     if (a === "--npm") {
       opts.npm = true;
+      continue;
+    }
+    if (a === "--homebrew") {
+      opts.homebrew = true;
+      continue;
+    }
+    if (a === "--no-homebrew") {
+      opts.homebrew = false;
+      continue;
+    }
+    if (a === "--tap") {
+      opts.tap = argv[++i];
+      if (!opts.tap) fail("--tap requires OWNER/NAME");
+      continue;
+    }
+    if (a.startsWith("--tap=")) {
+      opts.tap = a.slice("--tap=".length);
       continue;
     }
     if (a === "--dry-run") {
@@ -399,6 +424,63 @@ function step(label) {
   console.log(`\n==> ${label}`);
 }
 
+
+function publishHomebrewFormula({ version, tap, dryRun, tag }) {
+  requireCmd("gh");
+  const formulaName = "oz-acp.rb";
+  const genScript = path.join(ROOT, "scripts", "generate-homebrew-formula.mjs");
+  if (!fs.existsSync(genScript)) fail(`missing formula generator: ${genScript}`);
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "oz-acp-brew-"));
+  const formulaPath = path.join(tmpRoot, formulaName);
+
+  // Prefer GitHub release tarball (works without npm publish).
+  const genArgs = [genScript, version, "--source", "github", "--write", formulaPath];
+  if (dryRun) {
+    console.log(`[dry-run] node ${genArgs.join(" ")}`);
+  } else {
+    run("node", genArgs);
+  }
+
+  const tapDir = path.join(tmpRoot, "tap");
+  if (dryRun) {
+    console.log(`[dry-run] gh repo clone ${tap} ${tapDir} -- --depth 1`);
+    console.log(`[dry-run] write Formula/${formulaName}`);
+    console.log(`[dry-run] git commit + push on ${tap}`);
+    console.log(`[dry-run] formula preview path would be ${formulaPath}`);
+    if (fs.existsSync(formulaPath)) {
+      console.log(fs.readFileSync(formulaPath, "utf8"));
+    }
+    return;
+  }
+
+  run("gh", ["repo", "clone", tap, tapDir, "--", "--depth", "1"]);
+  const destDir = path.join(tapDir, "Formula");
+  fs.mkdirSync(destDir, { recursive: true });
+  const dest = path.join(destDir, formulaName);
+  fs.copyFileSync(formulaPath, dest);
+
+  // Commit only if changed.
+  const status = capture("git", ["-C", tapDir, "status", "--porcelain", `Formula/${formulaName}`]);
+  if (!status.stdout) {
+    console.log("Homebrew formula already up to date");
+    return;
+  }
+  run("git", ["-C", tapDir, "add", `Formula/${formulaName}`]);
+  run("git", [
+    "-C",
+    tapDir,
+    "commit",
+    "-m",
+    `formula(oz-acp): ${version}`,
+  ]);
+  run("git", ["-C", tapDir, "push", "origin", "HEAD"]);
+  const owner = tap.split("/")[0] || "tariqwest";
+  console.log(`Homebrew formula updated: https://github.com/${tap}/blob/main/Formula/${formulaName}`);
+  console.log(`Install: brew tap ${owner}/tap && brew install oz-acp`);
+}
+
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   process.chdir(ROOT);
@@ -436,6 +518,7 @@ async function main() {
   console.log(`  tag:            ${tag}`);
   console.log(`  github release: yes${opts.draft ? " (draft)" : ""}${opts.prerelease ? " (prerelease)" : ""}`);
   console.log(`  npm publish:    ${opts.npm ? "yes" : "no"}`);
+  console.log(`  homebrew tap:   ${opts.homebrew ? opts.tap : "no"}`);
   console.log(`  checks:         ${opts.skipChecks ? "skip" : "test + typecheck"}`);
   console.log(`  push:           ${opts.skipPush ? "no" : "yes"}`);
   console.log(`  dry-run:        ${opts.dryRun ? "yes" : "no"}`);
@@ -518,6 +601,16 @@ async function main() {
       run("pnpm", ["pack", "--dry-run"]);
       run("pnpm", publishArgs);
     }
+  }
+
+  if (opts.homebrew) {
+    step(`Updating Homebrew formula on ${opts.tap}`);
+    publishHomebrewFormula({
+      version,
+      tap: opts.tap,
+      dryRun: opts.dryRun,
+      tag,
+    });
   }
 
   step("Done");

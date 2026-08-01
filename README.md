@@ -474,7 +474,7 @@ pnpm typecheck      # optional tsc --noEmit
 
 ## Release
 
-Create a GitHub release (tag + `gh release`), optionally publishing to npm:
+Create a GitHub release (tag + `gh release`), optionally publishing to npm and updating the Homebrew tap:
 
 ```bash
 # dry-run (no git/gh/npm changes)
@@ -487,8 +487,25 @@ pnpm release 0.1.1
 pnpm release 0.1.1 --npm
 # or: node scripts/release.mjs 0.1.1 --npm --yes
 
+# GitHub release + Homebrew formula push to tariqwest/homebrew-tap
+pnpm release patch --homebrew --yes
+
 # bump from package.json (patch|minor|major) and release
-pnpm release patch --npm
+pnpm release patch --npm --homebrew --yes
+```
+
+Generate the formula alone:
+
+```bash
+pnpm formula 0.1.3                 # print Formula/oz-acp.rb to stdout
+pnpm formula 0.1.3 -- --write /tmp/oz-acp.rb
+```
+
+Install from the tap:
+
+```bash
+brew tap tariqwest/tap
+brew install oz-acp
 ```
 
 Requires a clean git worktree and `gh` auth. For `--npm` also run `npm login` (or `pnpm login`) first. OTP: `--otp 123456`.
