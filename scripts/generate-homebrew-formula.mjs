@@ -3,14 +3,15 @@
  * Generate a Homebrew formula for oz-acp.
  *
  * Usage:
- *   node scripts/generate-homebrew-formula.mjs [version] [options]
+ *   bun scripts/generate-homebrew-formula.mjs [version] [options]
+ *   bun run formula [version] [options]
  *
  * Examples:
- *   node scripts/generate-homebrew-formula.mjs 0.1.3
- *   node scripts/generate-homebrew-formula.mjs 0.1.3 --sha256 abc...
- *   node scripts/generate-homebrew-formula.mjs 0.1.3 --write ./Formula/oz-acp.rb
- *   node scripts/generate-homebrew-formula.mjs 0.1.3 --source github
- *   node scripts/generate-homebrew-formula.mjs 0.1.3 --source npm
+ *   bun run formula 0.1.3
+ *   bun run formula 0.1.3 -- --sha256 abc...
+ *   bun run formula 0.1.3 -- --write ./Formula/oz-acp.rb
+ *   bun run formula 0.1.3 -- --source github
+ *   bun run formula 0.1.3 -- --source npm
  *
  * Options:
  *   --sha256 HEX           Use this sha256 (otherwise fetch tarball and hash)

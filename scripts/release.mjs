@@ -4,17 +4,17 @@
  *
  * Usage:
  *   node scripts/release.mjs [version] [options]
- *   pnpm release [version] [options]
- *   pnpm release -- [version] [options]   # also works; bare -- is ignored
+ *   bun run release [version] [options]
+ *   bun run release -- [version] [options]   # bare -- is ignored
  *
  * Examples:
- *   pnpm release 0.1.1
- *   pnpm release 0.2.0 --npm
- *   pnpm release --npm                    # use package.json version
- *   pnpm release 0.1.1 --dry-run
- *   pnpm release patch --npm              # npm version bump style: patch|minor|major
- *   pnpm release patch --homebrew         # also update tariqwest/homebrew-tap Formula/oz-acp.rb
- *   pnpm release 0.1.4 --homebrew --npm
+ *   bun run release 0.1.1
+ *   bun run release 0.2.0 --npm
+ *   bun run release --npm                    # use package.json version
+ *   bun run release 0.1.1 --dry-run
+ *   bun run release patch --npm              # npm version bump style: patch|minor|major
+ *   bun run release patch --homebrew         # also update tariqwest/homebrew-tap Formula/oz-acp.rb
+ *   bun run release 0.1.4 --homebrew --npm
  *
  * Options:
  *   --npm              Publish to npm after creating the GitHub release
@@ -22,7 +22,7 @@
  *   --tap OWNER/NAME   Homebrew tap repo (default: tariqwest/homebrew-tap)
  *   --no-homebrew      Skip Homebrew formula update (default is off unless --homebrew)
  *   --dry-run          Print actions without changing git/npm/GitHub
- *   --skip-checks      Skip pnpm test / typecheck
+ *   --skip-checks      Skip bun test / typecheck
  *   --skip-push        Create local tag/commit but do not push
  *   --draft            Create a draft GitHub release
  *   --prerelease       Mark the GitHub release as prerelease
@@ -91,7 +91,7 @@ function parseArgs(argv) {
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    // pnpm may forward a bare "--" separator; ignore it.
+    // package managers may forward a bare "--" separator; ignore it.
     if (a === "--") continue;
     if (a === "--help" || a === "-h") usage(0);
     if (a === "--npm") {
@@ -354,7 +354,7 @@ function ensureGitReady({ dryRun }) {
 }
 
 function ensureTools({ npm }) {
-  requireCmd("pnpm");
+  requireCmd("bun");
   requireCmd("gh");
   if (npm) requireCmd("npm");
 }
@@ -365,18 +365,13 @@ function ensureGhAuth() {
 }
 
 function ensureNpmAuth() {
-  // Prefer npm whoami against the default registry; pnpm whoami works too.
+  // Prefer npm whoami against the default registry.
   const npm = capture("npm", ["whoami"], { allowFail: true });
   if (npm.status === 0 && npm.stdout) {
     console.log(`npm authenticated as ${npm.stdout}`);
     return;
   }
-  const pnpmWho = capture("pnpm", ["whoami"], { allowFail: true });
-  if (pnpmWho.status === 0 && pnpmWho.stdout) {
-    console.log(`npm authenticated as ${pnpmWho.stdout}`);
-    return;
-  }
-  fail("not logged in to npm; run `npm login` (or `pnpm login`) before --npm");
+  fail("not logged in to npm; run `npm login` before --npm");
 }
 
 function assertPackagePublishable(pkg) {
@@ -403,9 +398,9 @@ function releaseExists(tag) {
   return res.status === 0;
 }
 
-function pnpmRunner() {
-  // Prefer pnpm for install/test; fall back is not needed since we require pnpm.
-  return "pnpm";
+function bunRunner() {
+  // Primary runtime for checks/scripts. Package bin also supports Node+tsx for npx.
+  return "bun";
 }
 
 async function confirm(promptText, { yes }) {
@@ -529,11 +524,11 @@ async function main() {
   if (!opts.skipChecks) {
     step("Running checks");
     if (opts.dryRun) {
-      console.log(`[dry-run] ${pnpmRunner()} test`);
-      console.log(`[dry-run] ${pnpmRunner()} typecheck`);
+      console.log(`[dry-run] ${bunRunner()} test`);
+      console.log(`[dry-run] ${bunRunner()} run typecheck`);
     } else {
-      run(pnpmRunner(), ["test"]);
-      run(pnpmRunner(), ["typecheck"]);
+      run(bunRunner(), ["test"]);
+      run(bunRunner(), ["run", "typecheck"]);
     }
   }
 
@@ -589,17 +584,17 @@ async function main() {
 
   if (opts.npm) {
     step("Publishing to npm");
-    // Use pnpm publish (this repo is pnpm-first). --no-git-checks because we already
-    // created/pushed the release tag ourselves. Access comes from publishConfig too.
-    const publishArgs = ["publish", "--access", "public", "--no-git-checks"];
+    // npm publish keeps the Node package registry path simple. --ignore-scripts
+    // is intentionally NOT used: prepublishOnly runs bun test + typecheck.
+    const publishArgs = ["publish", "--access", "public"];
     if (opts.otp) publishArgs.push("--otp", opts.otp);
     if (opts.dryRun) {
-      console.log(`[dry-run] pnpm ${publishArgs.join(" ")}`);
-      console.log("[dry-run] pnpm pack --dry-run");
-      run("pnpm", ["pack", "--dry-run"]);
+      console.log(`[dry-run] npm ${publishArgs.join(" ")}`);
+      console.log("[dry-run] npm pack --dry-run");
+      run("npm", ["pack", "--dry-run"]);
     } else {
-      run("pnpm", ["pack", "--dry-run"]);
-      run("pnpm", publishArgs);
+      run("npm", ["pack", "--dry-run"]);
+      run("npm", publishArgs);
     }
   }
 
