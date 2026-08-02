@@ -187,8 +187,42 @@ function renderFormula({
   sha256,
   repo,
 }) {
+  // oz ships as a cask on warpdotdev/homebrew-warp (not a formula).
+  // Homebrew formulas cannot `depends_on cask:`; use a Requirement that
+  // checks for `oz` on PATH and points installers at the Warp cask.
+  // https://github.com/warpdotdev/homebrew-warp/blob/main/Casks/oz.rb
   return `# typed: false
 # frozen_string_literal: true
+
+# Warp packages \`oz\` as a cask (warpdotdev/warp/oz), not a formula.
+# Formulae cannot declare cask deps via depends_on, so require the binary.
+class OzCliRequirement < Requirement
+  fatal true
+  cask "warpdotdev/warp/oz"
+
+  satisfy(build_env: false) { which("oz") }
+
+  def message
+    <<~EOS
+      oz-acp requires the Warp Oz CLI (\`oz\`) on PATH.
+
+      Install from the Warp Homebrew tap:
+
+        brew install --cask warpdotdev/warp/oz
+
+      Or:
+
+        brew tap warpdotdev/warp
+        brew install --cask oz
+
+      Then re-run: brew install oz-acp
+    EOS
+  end
+
+  def display_s
+    "oz (Warp CLI cask warpdotdev/warp/oz)"
+  end
+end
 
 class ${className} < Formula
   desc "${rubyEscape(desc)}"
@@ -199,6 +233,7 @@ class ${className} < Formula
   head "https://github.com/${repo}.git", branch: "main"
 
   depends_on "node"
+  depends_on OzCliRequirement
 
   def install
     system "npm", "install", *std_npm_args
@@ -210,7 +245,11 @@ class ${className} < Formula
 
         #{bin}/oz-acp
 
-      Requires the Warp oz CLI on PATH (or set OZ_BIN_PATH / WARP_API_KEY).
+      Runtime dependency: Warp Oz CLI (\`oz\`) from warpdotdev/homebrew-warp:
+
+        brew install --cask warpdotdev/warp/oz
+
+      Auth with \`oz login\` or set WARP_API_KEY. Override binary via OZ_BIN_PATH.
     EOS
   end
 

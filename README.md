@@ -14,7 +14,7 @@ ACP host (Zed / VS Code / …)
 - **Bun 1.1+** and/or **Node.js 20+**
   - **Bun:** preferred for development; also supported when running the package under Bun (`bunx`, `bun run`)
   - **Node + tsx:** default package bin path for `npx` / global npm / many ACP hosts
-- **`oz`** on your `PATH` (Warp CLI / Homebrew)
+- **`oz`** on your `PATH` — Warp CLI cask: `brew install --cask warpdotdev/warp/oz` ([warpdotdev/homebrew-warp](https://github.com/warpdotdev/homebrew-warp))
 - Auth via `oz login` **or** `WARP_API_KEY`
 
 Check tools:
@@ -39,7 +39,8 @@ npx -y https://github.com/tariqwest/oz-acp
 # after the package is on npm
 npx -y oz-acp
 
-# Homebrew
+# Homebrew (pulls Node; requires Warp oz cask on PATH)
+brew install --cask warpdotdev/warp/oz
 brew tap tariqwest/tap && brew install oz-acp && oz-acp
 ```
 
@@ -52,7 +53,8 @@ These install/run paths use the package bin (`bin/oz-acp.mjs`): under **Node** i
 npm install -g https://github.com/tariqwest/oz-acp
 # after npm publish
 npm install -g oz-acp
-# Homebrew tap
+# Homebrew tap (requires Warp oz cask — see Prerequisites)
+brew install --cask warpdotdev/warp/oz   # if needed
 brew tap tariqwest/tap && brew install oz-acp
 
 oz-acp   # on PATH (Node+tsx or Bun, depending on how the bin is invoked)
@@ -654,9 +656,13 @@ bun run formula 0.1.3 -- --write /tmp/oz-acp.rb
 Install from the tap:
 
 ```bash
+# oz is a cask on warpdotdev/homebrew-warp (formula cannot auto-install casks)
+brew install --cask warpdotdev/warp/oz
 brew tap tariqwest/tap
 brew install oz-acp
 ```
+
+The formula declares a fatal requirement for `oz` on PATH and points installers at `warpdotdev/warp/oz` when missing.
 
 Requires a clean git worktree and `gh` auth. For `--npm` also run `npm login` first. OTP: `--otp 123456`.
 
