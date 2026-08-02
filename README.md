@@ -594,8 +594,8 @@ bun run typecheck           # tsc --noEmit (optional)
 | `bun start` / `bun run oz-acp` | One-shot Bun server (`src/index.ts`) |
 | `bun test` | Unit tests under `src/` |
 | `bun run typecheck` | `tsc --noEmit` |
-| `bun run formula …` | Generate Homebrew formula |
-| `bun run release …` | Tag / GitHub release / optional npm + Homebrew tap |
+| `bun run formula …` | Generate Homebrew formula (preview; releases update the tap automatically) |
+| `bun run release …` | Tag + GitHub release + Homebrew tap (optional `--npm`; skip tap with `--no-homebrew`) |
 | `bun run start:node` | Force Node+tsx start path |
 | `bun run test:node` | Node+tsx/`node:test` unit tests |
 | `node bin/oz-acp.mjs` | Package bin under Node (tsx) |
@@ -626,27 +626,27 @@ node bin/oz-acp.mjs
 
 ## Release
 
-Create a GitHub release (tag + `gh release`), optionally publishing to npm and updating the Homebrew tap:
+Every release **couples** a GitHub release (tag + `gh release`) with a Homebrew formula update on `tariqwest/homebrew-tap`. npm publish remains optional.
 
 ```bash
-# dry-run (no git/gh/npm changes)
+# dry-run (no git/gh/npm/tap changes)
 bun run release 0.1.1 --dry-run
 
-# GitHub release only
+# GitHub release + Homebrew formula (default)
 bun run release 0.1.1
 
-# GitHub release + npm publish
+# + npm publish
 bun run release 0.1.1 --npm
 # or: bun scripts/release.mjs 0.1.1 --npm --yes
 
-# GitHub release + Homebrew formula push to tariqwest/homebrew-tap
-bun run release patch --homebrew --yes
+# bump from package.json (patch|minor|major)
+bun run release patch --npm --yes
 
-# bump from package.json (patch|minor|major) and release
-bun run release patch --npm --homebrew --yes
+# GitHub only (skip tap)
+bun run release 0.1.4 --no-homebrew --yes
 ```
 
-Generate the formula alone:
+`bun run formula` is for local preview only; prefer `bun run release` so the published tag and tap formula stay in sync:
 
 ```bash
 bun run formula 0.1.3                 # print Formula/oz-acp.rb to stdout

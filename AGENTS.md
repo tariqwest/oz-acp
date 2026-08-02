@@ -33,8 +33,8 @@ bun run start:node         # force Node+tsx start
 bun run test:node          # Node+tsx/`node:test` parity
 bun bin/oz-acp.mjs         # package bin on Bun
 node bin/oz-acp.mjs        # package bin on Node (tsx; npx path)
-bun run formula <ver>      # print Homebrew formula
-bun run release <ver>      # GitHub release; add --npm / --homebrew
+bun run formula <ver>      # print Homebrew formula (preview)
+bun run release <ver>      # GitHub release + Homebrew tap (default); add --npm; --no-homebrew to skip tap
 ```
 
 Lockfile: `bun.lock` (do not reintroduce pnpm lockfiles).
@@ -51,8 +51,8 @@ Lockfile: `bun.lock` (do not reintroduce pnpm lockfiles).
 - `src/model-labels.ts` — optional UUID → display label map (reads user config only)
 - `src/types.ts` — zod schemas
 - `bin/oz-acp.mjs` — package bin; Bun imports `src/index.ts` directly, Node spawns tsx (npx-compatible)
-- `scripts/release.mjs` — GitHub release (+ optional npm / Homebrew tap); checks via Bun
-- `scripts/generate-homebrew-formula.mjs` — Homebrew formula generator
+- `scripts/release.mjs` — GitHub release + Homebrew tap update (coupled by default; optional npm); checks via Bun
+- `scripts/generate-homebrew-formula.mjs` — Homebrew formula generator (used by release; local preview via `bun run formula`)
 - `scripts/examples/probe-model-labels.mjs` — **example only** (not wired into the adapter): infer UUID labels by probing models
 
 ## Key paths

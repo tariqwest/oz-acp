@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 /**
- * Create a GitHub release for oz-acp, and optionally publish to npm.
+ * Create a GitHub release for oz-acp, update the Homebrew tap formula, and
+ * optionally publish to npm.
+ *
+ * GitHub release and Homebrew formula updates are coupled: every release
+ * regenerates Formula/oz-acp.rb and pushes it to the tap (unless opted out).
  *
  * Usage:
  *   node scripts/release.mjs [version] [options]
@@ -8,22 +12,22 @@
  *   bun run release -- [version] [options]   # bare -- is ignored
  *
  * Examples:
- *   bun run release 0.1.1
- *   bun run release 0.2.0 --npm
+ *   bun run release 0.1.1                    # GitHub release + Homebrew tap
+ *   bun run release 0.2.0 --npm              # + npm publish
  *   bun run release --npm                    # use package.json version
  *   bun run release 0.1.1 --dry-run
  *   bun run release patch --npm              # npm version bump style: patch|minor|major
- *   bun run release patch --homebrew         # also update tariqwest/homebrew-tap Formula/oz-acp.rb
- *   bun run release 0.1.4 --homebrew --npm
+ *   bun run release 0.1.4 --no-homebrew      # GitHub only (skip tap)
  *
  * Options:
  *   --npm              Publish to npm after creating the GitHub release
- *   --homebrew         Generate Homebrew formula and push to the tap repo
+ *   --homebrew         Update Homebrew formula (default: on; kept for clarity)
+ *   --no-homebrew      Skip Homebrew formula update
  *   --tap OWNER/NAME   Homebrew tap repo (default: tariqwest/homebrew-tap)
- *   --no-homebrew      Skip Homebrew formula update (default is off unless --homebrew)
- *   --dry-run          Print actions without changing git/npm/GitHub
+ *   --dry-run          Print actions without changing git/npm/GitHub/tap
  *   --skip-checks      Skip bun test / typecheck
- *   --skip-push        Create local tag/commit but do not push
+ *   --skip-push        Create local tag/commit but do not push (implies no Homebrew;
+ *                      formula needs the remote tag tarball)
  *   --draft            Create a draft GitHub release
  *   --prerelease       Mark the GitHub release as prerelease
  *   --yes, -y          Skip interactive confirmation
@@ -73,7 +77,8 @@ function parseArgs(argv) {
   const opts = {
     versionArg: null,
     npm: false,
-    homebrew: false,
+    // Coupled to GitHub releases by default; use --no-homebrew to skip.
+    homebrew: true,
     tap: "tariqwest/homebrew-tap",
     dryRun: false,
     skipChecks: false,
@@ -353,10 +358,11 @@ function ensureGitReady({ dryRun }) {
   return { branch };
 }
 
-function ensureTools({ npm }) {
+function ensureTools({ npm, homebrew }) {
   requireCmd("bun");
   requireCmd("gh");
   if (npm) requireCmd("npm");
+  if (homebrew) requireCmd("git");
 }
 
 function ensureGhAuth() {
@@ -480,7 +486,13 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   process.chdir(ROOT);
 
-  ensureTools({ npm: opts.npm });
+  // Formula needs the remote GitHub tag/tarball; --skip-push cannot couple.
+  if (opts.homebrew && opts.skipPush) {
+    console.warn("warning: --skip-push disables Homebrew formula update (no remote tag tarball)");
+    opts.homebrew = false;
+  }
+
+  ensureTools({ npm: opts.npm, homebrew: opts.homebrew });
   const { branch } = ensureGitReady({ dryRun: opts.dryRun });
   ensureGhAuth();
 
@@ -606,6 +618,8 @@ async function main() {
       dryRun: opts.dryRun,
       tag,
     });
+  } else {
+    console.log("\n(skipping Homebrew formula update)");
   }
 
   step("Done");
@@ -617,6 +631,11 @@ async function main() {
       console.log(`GitHub release tag: ${tag}`);
     }
     if (opts.npm) console.log(`npm: https://www.npmjs.com/package/${pkg.name}/v/${version}`);
+    if (opts.homebrew) {
+      const owner = opts.tap.split("/")[0] || "tariqwest";
+      console.log(`Homebrew: brew tap ${owner}/tap && brew install oz-acp`);
+      console.log(`Formula: https://github.com/${opts.tap}/blob/main/Formula/oz-acp.rb`);
+    }
   } else {
     console.log("Dry run complete — no changes were made.");
   }
